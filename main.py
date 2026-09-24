@@ -1,4 +1,5 @@
 import time
+import re
 from src import database
 from src import fetching
 from src import parsing
@@ -40,6 +41,17 @@ def retry(func, max_attempts, *args):
                 print(f"coudn't resolve the issue, error: {e}, max attempts reached, please try again")
                 return []
 status, row_id = database.insert_scraper_logs()
+
+
+def compilation_fnct(parsing_data, novels_list):
+
+    novels_dict_by_name = {
+        novels_list['novel_name']: {
+            key: value for key, value in novels_list.items() if key != 'novel_name'
+        }
+    }
+
+    novel_name_chapter = re.compile(r"[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?([a-zA-Z-]+)-[0-9a-zA-Z]*[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?(\d+(\.\d+)?)")
 
 
 
