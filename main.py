@@ -45,7 +45,7 @@ status, row_id = database.insert_scraper_logs()
 
 def compilation_fnct(parsing_data, novels_list):
 
-    novels_dict_by_name = {
+    fetched_novels = {
         novels_list['novel_name']: {
             key: value for key, value in novels_list.items() if key != 'novel_name'
         }
@@ -53,6 +53,20 @@ def compilation_fnct(parsing_data, novels_list):
 
     novel_name_chapter = re.compile(r"[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?([a-zA-Z-]+)-[0-9a-zA-Z]*[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?(\d+(\.\d+)?)")
 
+    highest_chapter = {}
+
+    for data in parsing_data:
+        match = novel_name_chapter.search(data)
+
+        if match:
+            series_name = match.group(1)
+            chapter_number = float(match.group(2))
+
+        if series_name not in highest_chapter or chapter_number > highest_chapter[series_name]:
+            highest_chapter[series_name] = chapter_number
+        for name, chap_num in highest_chapter.items():
+            display_chap = int(chap_num) if chap_num.is_integer() else  chap_num
+            highest_chapter[name] = display_chap
 
 
 
