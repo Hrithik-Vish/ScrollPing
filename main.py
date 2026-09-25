@@ -16,7 +16,7 @@ def process_website(site_id, web_url):
 
     html_structure = retry(fetching.fetch_html, max_attempts, web_url)
     if not html_structure:
-        return []   
+        return ""
 
     parsing_data = parsing.parse_html(html_structure)
     if not parsing_data:
@@ -67,6 +67,8 @@ def compilation_fnct(parsing_data, novels_list):
         for name, chap_num in highest_chapter.items():
             display_chap = int(chap_num) if chap_num.is_integer() else  chap_num
             highest_chapter[name] = display_chap
+
+    updates_in_novels = {}
 
 
 

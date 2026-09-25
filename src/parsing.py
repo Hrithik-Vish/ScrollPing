@@ -3,9 +3,8 @@ from bs4 import BeautifulSoup
 
 def parse_html(file):
     soup = BeautifulSoup(file,"lxml")
-    title = re.escape("hello world")
 
-    html_content = soup.find_all("a", href = re.compile(rf"[/-]?(chapters?|chs?|episodes?|eps?|({title}))[/-]?(\d+(\.\d+)?)"))
+    html_content = soup.find_all("a", href = re.compile(r"[/-]?(chapters?|chs?|episodes?|eps?|)[/-]?(\d+(\.\d+)?)"))
     #re.compile needs working with edge cases
     
     html_data = []

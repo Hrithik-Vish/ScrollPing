@@ -147,8 +147,11 @@ def update_scraper_logs(row_id):
             update_scraper_log = (
                 supabase.table("scraper_logs").update({"run_status": "success"}).eq("id", row_id).execute()
             )
-            status = True
-            break
+            if update_scraper_log.data:
+                status = True
+                break
+            else:
+                print(f"no row matched id: {row_id}, update did not apply")
 
         except Exception as e:
             if attempt < max_attempts:

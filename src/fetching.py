@@ -11,17 +11,20 @@ def fetch_html(url):
             return response.text
         else:
             print("there was a problem, resturned status code: ",response.status_code)
-            return
+            return ""
 
     except requests.exceptions.ConnectTimeout:
         print("connection timeout")
         print("fail")
+        return ""
     except requests.exceptions.ConnectionError:
         print("connection error")
         print("fail")
+        return ""
     except requests.exceptions.RequestException as error:
         print("details: ", error)
         print("fail")
+        return ""
 
 
 # this is for testing the function
