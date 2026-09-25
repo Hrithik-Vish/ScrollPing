@@ -20,14 +20,14 @@ def process_website(site_id, web_url):
 
     parsing_data = parsing.parse_html(html_structure)
     if not parsing_data:
-        return []  
+        return []
 
     novels_list = retry(database.fetch_novels, max_attempts, site_id)
     if not novels_list:
-        return []   
+        return []
 
     
-    return updated_novel_list   
+    return updated_novel_list
 
 def retry(func, max_attempts, *args):
     for attempts in range(1, max_attempts + 1):
@@ -62,11 +62,11 @@ def compilation_fnct(parsing_data, novels_list):
             series_name = match.group(1)
             chapter_number = float(match.group(2))
 
-        if series_name not in highest_chapter or chapter_number > highest_chapter[series_name]:
-            highest_chapter[series_name] = chapter_number
-        for name, chap_num in highest_chapter.items():
-            display_chap = int(chap_num) if chap_num.is_integer() else  chap_num
-            highest_chapter[name] = display_chap
+            if series_name not in highest_chapter or chapter_number > highest_chapter[series_name]:
+                highest_chapter[series_name] = chapter_number
+            for name, chap_num in highest_chapter.items():
+                display_chap = int(chap_num) if chap_num.is_integer() else  chap_num
+                highest_chapter[name] = display_chap
 
     updates_in_novels = {}
 
