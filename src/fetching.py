@@ -36,6 +36,24 @@ def fetch_html(url):
 #     print("data saved to html_txt sucessfully")
 # else: 
 #     print("cannot save data, no data fetched to save")
+
+
+# -------------------------------------------------------------------------------------------------------------
+# Sites on which fetching is working properly:
+# SITES = [
+#     {"site_name": "asurascans", "url": "https://asurascans.com/", "priority": "core", "mode": "html"},
+#     {"site_name": "hivetoons", "url": "https://hivetoons.org/", "priority": "core", "mode": "html"},
+#     {"site_name": "kunmanga", "url": "https://www.kunmanga.online/", "priority": "core", "mode": "html"},
+#     {"site_name": "mgeko", "url": "https://www.mgeko.cc/jumbo/manga/", "priority": "secondary", "mode": "html_li_block"},
+#     {
+#         "site_name": "mangadex",
+#         "url": "https://api.mangadex.org/chapter?includes[]=manga&order[publishAt]=desc&limit=32&offset=0",
+#         "priority": "secondary",
+#         "mode": "json",
+#     },
+#     {"site_name": "vortexscans", "url": "https://vortexscans.org/", "priority": "secondary", "mode": "html"},
+# ]
+# -------------------------------------------------------------------------------------------------------------
     
 
 

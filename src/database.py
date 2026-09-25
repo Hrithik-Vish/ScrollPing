@@ -41,7 +41,7 @@ def fetch_websites():
                 return websites_list
             else:
                 print("data fetched was empty")
-                return
+                return []
 
         except Exception as e:
             if attempt < max_attempts:
@@ -49,6 +49,7 @@ def fetch_websites():
                 time.sleep(5)
             else:
                 print(f"attempt: {attempt} failed,\nall attempts failed, try again later, exception: {e}")
+                return []
 
 
 
@@ -67,7 +68,7 @@ def fetch_novels(site_id):
                 return novels_list
             else:
                 print("data fetched was empty")
-                return
+                return []
 
         except Exception as e:
             if attempt < max_attempts:
@@ -75,6 +76,7 @@ def fetch_novels(site_id):
                 time.sleep(5)
             else:
                 print(f"attempt: {attempt} failed,\nall attempts failed, try again later, exception: {e}")
+                return []
 
 
 
@@ -131,6 +133,7 @@ def insert_scraper_logs():
                 time.sleep(5)
             else:
                 print(f"all attempts failed, scraper cannot run further, please try againg later. error: {e}")
+                return []
     
     return status, row_id
 
@@ -179,7 +182,7 @@ def fetch_subscribers(novel_id_list):
                 return subscribers_list
             else:
                 print("data fetched was empty")
-                return
+                return []
 
         except Exception as e:
             if attempt < max_attempts:
@@ -187,3 +190,4 @@ def fetch_subscribers(novel_id_list):
                 time.sleep(5)
             else:
                 print(f"attempt: {attempt} failed,\nall attempts failed, try again later, exception: {e}")
+                return []
