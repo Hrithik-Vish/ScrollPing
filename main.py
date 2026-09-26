@@ -26,6 +26,13 @@ def process_website(site_id, web_url):
     if not novels_list:
         return []
 
+    fetched_novels = {
+    novel['novel_name']: {
+        key: value for key, value in novel.items() if key != 'novel_name'
+        }
+        for novel in novels_list
+    }
+
     
     return updated_novel_list
 
@@ -44,15 +51,7 @@ status, row_id = database.insert_scraper_logs()
 
 
 def compilation_fnct(parsing_data, novels_list):
-
-    fetched_novels = {
-        novels_list['novel_name']: {
-            key: value for key, value in novels_list.items() if key != 'novel_name'
-        }
-    }
-
     novel_name_chapter = re.compile(r"[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?([a-zA-Z-]+)-[0-9a-zA-Z]*[/-]?(?:chapters?|chs?|comics?|episodes?|eps?)[/-]?(\d+(\.\d+)?)")
-
     highest_chapter = {}
 
     for data in parsing_data:
