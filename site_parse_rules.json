@@ -1,0 +1,35 @@
+{
+  "https://asurascans.com/": {
+    "mode": "html",
+    "segment_count": 4,
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
+    "slug_hash_strip_regex": "-[a-f0-9]{8}$"
+  },
+  "https://hivetoons.org/": {
+    "mode": "html",
+    "segment_count": 3,
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+  },
+  "https://www.kunmanga.online/": {
+    "mode": "html",
+    "segment_count": 3,
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+  },
+  "https://vortexscans.org/": {
+    "mode": "html",
+    "segment_count": 3,
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+  },
+  "https://www.mgeko.cc/jumbo/manga/": {
+    "mode": "html_li_block",
+    "item_selector": "li.novel-item",
+    "identity_selector": "a.list-body",
+    "identity_attr": "href",
+    "chapter_text_selector": "h5.chapter-title",
+    "chapter_regex": "Chapter\\s+(\\d+(\\.\\d+)?)"
+  },
+  "https://api.mangadex.org/chapter?includes[]=manga&order[publishAt]=desc&limit=32&offset=0": {
+    "mode": "json",
+    "language_filter": "en"
+  }
+}
