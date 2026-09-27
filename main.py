@@ -6,10 +6,10 @@ from src import fetching
 from src import parsing
 from src import telegramMessenger
 
-def finding_updated_novels(site_id_list, web_url_list):
+def finding_updated_novels(site_id_list, web_url_list, site_parse_rules):
     updated_novel_list = []
     for site_id, web_url in zip(site_id_list, web_url_list):
-        updated_novel_list.extend(process_website(site_id, web_url))
+        updated_novel_list.extend(process_website(site_id, web_url, site_parse_rules))
     return updated_novel_list
 
 
@@ -26,8 +26,7 @@ def retry(func, max_attempts, *args):
                 return []
 
 
-def compilation_fnct(parsing_data, fetched_novels, url):
-    rules = site_parse_rules[url]
+def compilation_fnct(parsing_data, fetched_novels, rules):
     updated_rows = []
     skipped = []
     original_latest = {name: info["latest_chap"] for name, info in fetched_novels.items()}
@@ -70,7 +69,7 @@ def compilation_fnct(parsing_data, fetched_novels, url):
     return updated_rows, skipped
 
 
-def process_website(site_id, web_url):
+def process_website(site_id, web_url, site_parse_rules):
     max_attempts = 3
 
     html_structure = retry(fetching.fetch_html, max_attempts, web_url)
@@ -90,7 +89,8 @@ def process_website(site_id, web_url):
         for novel in novels_list
     }
 
-    updated_rows, skipped = compilation_fnct(parsing_data, fetched_novels, web_url)
+    site_rules = site_parse_rules[web_url]
+    updated_rows, skipped = compilation_fnct(parsing_data, fetched_novels, site_rules)
     # TODO: do something with `skipped` — at least log/print for now
     return updated_rows
 
@@ -111,7 +111,7 @@ if status == True:
     with open('site_parse_rules.json', 'r') as file:
         site_parse_rules = json.load(file)
 
-    updated_novel_list = finding_updated_novels(site_id, web_url)
+    updated_novel_list = finding_updated_novels(site_id, web_url, site_parse_rules)
 
     database.update_novels_table(updated_novel_list)
 
