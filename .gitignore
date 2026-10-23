@@ -1,5 +1,10 @@
 .env
+venv/
+__pycache__/
+.pytest_cache/
 html_txt.txt
 a_tags.txt
-venv
-docs/
+docker-output/
+.vscode/*
+!.vscode/tasks.json
+docs/.obsidian/
