@@ -91,7 +91,11 @@ def process_website(site_id, web_url, site_parse_rules):
 
     site_rules = site_parse_rules[web_url]
     updated_rows, skipped = compilation_fnct(parsing_data, fetched_novels, site_rules)
-    # TODO: do something with `skipped` — at least log/print for now
+
+    if skipped:
+        for data in skipped:
+            print(f"{site_id}: {web_url}: {data}")
+
     return updated_rows
 
 
