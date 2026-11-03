@@ -1,0 +1,99 @@
+{
+  "https://asurascans.com/": {
+    "links": [
+      "/comics/sword-gods-livestream-ab39de10/chapter/43",
+      "/comics/sword-gods-livestream-ab39de10/chapter/42",
+      "/comics/sword-gods-livestream-ab39de10/chapter/41",
+      "/comics/the-tale-of-cultivation-and-demon-extermination-ab39de10/chapter/21",
+      "/comics/the-tale-of-cultivation-and-demon-extermination-ab39de10/chapter/20",
+      "/comics/the-tale-of-cultivation-and-demon-extermination-ab39de10/chapter/19",
+      "/comics/blade-of-the-discarded-ab39de10/chapter/7",
+      "/comics/blade-of-the-discarded-ab39de10/chapter/6",
+      "/comics/blade-of-the-discarded-ab39de10/chapter/5",
+      "/comics/return-of-the-mount-hua-sect-ab39de10/chapter/186",
+      "/comics/return-of-the-mount-hua-sect-ab39de10/chapter/185",
+      "/comics/return-of-the-mount-hua-sect-ab39de10/chapter/184"
+    ],
+    "expected_latest": {
+      "sword-gods-livestream": 43,
+      "the-tale-of-cultivation-and-demon-extermination": 21,
+      "blade-of-the-discarded": 7,
+      "return-of-the-mount-hua-sect": 186
+    }
+  },
+  "https://hivetoons.org/": {
+    "links": [
+      "/series/crocodile/chapter-28",
+      "/series/crocodile/chapter-27",
+      "/series/crocodile/chapter-25",
+      "/series/crocodile/chapter-24",
+      "/series/the-demon-king's-friend/chapter-15",
+      "/series/the-demon-king's-friend/chapter-14",
+      "/series/the-demon-king's-friend/chapter-13",
+      "/series/the-demon-king's-friend/chapter-12",
+      "/series/lookism/chapter-631",
+      "/series/lookism/chapter-630_01",
+      "/series/lookism/chapter-629"
+    ],
+    "expected_latest": {
+      "crocodile": 28,
+      "the-demon-king's-friend": 15,
+      "lookism": 631
+    }
+  },
+  "https://www.kunmanga.online/": {
+    "links": [
+      "/manga/sword-art-online-integral-factor-prologue-comic/chapter-0",
+      "/manga/monster-s-streamer-star/chapter-10",
+      "/manga/monster-s-streamer-star/chapter-9",
+      "/manga/i-have-become-the-young-proprietress-of-ayakashi-inn-in-michinoku-ginzan-onsen/chapter-3",
+      "/manga/i-have-become-the-young-proprietress-of-ayakashi-inn-in-michinoku-ginzan-onsen/chapter-2",
+      "/manga/finale/chapter-1",
+      "/manga/i-went-from-the-strongest-job-dragon-knight-to-a-beginner-level-job-carrier-yet-for-some-reason-the-heroes-rely-on-me/chapter-50",
+      "/manga/i-went-from-the-strongest-job-dragon-knight-to-a-beginner-level-job-carrier-yet-for-some-reason-the-heroes-rely-on-me/chapter-49",
+      "/manga/apothesis-in-nine-acts-how-i-end-up-saving-the-world/chapter-7",
+      "/manga/apothesis-in-nine-acts-how-i-end-up-saving-the-world/chapter-6",
+      "/manga/meroi-kun/chapter-0",
+      "/manga/switch-yonehara-hideyuki/chapter-0",
+      "/manga/mechanic-slayer/chapter-20",
+      "/manga/mechanic-slayer/chapter-19"
+    ],
+    "expected_latest": {
+      "sword-art-online-integral-factor-prologue-comic": 0,
+      "monster-s-streamer-star": 10,
+      "i-have-become-the-young-proprietress-of-ayakashi-inn-in-michinoku-ginzan-onsen": 3,
+      "finale": 1,
+      "i-went-from-the-strongest-job-dragon-knight-to-a-beginner-level-job-carrier-yet-for-some-reason-the-heroes-rely-on-me": 50,
+      "apothesis-in-nine-acts-how-i-end-up-saving-the-world": 7,
+      "meroi-kun": 0,
+      "switch-yonehara-hideyuki": 0,
+      "mechanic-slayer": 20
+    }
+  },
+  "https://vortexscans.org/": {
+    "links": [
+      "/series/my-girlfriend-returned-as-a-dragon/chapter-12",
+      "/series/my-girlfriend-returned-as-a-dragon/chapter-11",
+      "/series/my-girlfriend-returned-as-a-dragon/chapter-10",
+      "/series/my-girlfriend-returned-as-a-dragon/chapter-9",
+      "/series/solo-swordmaster/chapter-25",
+      "/series/solo-swordmaster/chapter-24",
+      "/series/solo-swordmaster/chapter-23",
+      "/series/solo-swordmaster/chapter-22",
+      "/series/the-crimson-dragon-martial-emperor/chapter-26",
+      "/series/the-crimson-dragon-martial-emperor/chapter-25",
+      "/series/the-crimson-dragon-martial-emperor/chapter-23",
+      "/series/the-crimson-dragon-martial-emperor/chapter-22",
+      "/series/the-crazy-villain-regains-his-sanity/chapter-24",
+      "/series/the-crazy-villain-regains-his-sanity/chapter-23",
+      "/series/the-crazy-villain-regains-his-sanity/chapter-22",
+      "/series/the-crazy-villain-regains-his-sanity/chapter-21"
+    ],
+    "expected_latest": {
+      "my-girlfriend-returned-as-a-dragon": 12,
+      "solo-swordmaster": 25,
+      "the-crimson-dragon-martial-emperor": 26,
+      "the-crazy-villain-regains-his-sanity": 24
+    }
+  }
+}

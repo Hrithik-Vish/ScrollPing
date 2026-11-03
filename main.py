@@ -95,29 +95,34 @@ def process_website(site_id, web_url, site_parse_rules):
     return updated_rows
 
 
-status, row_id = database.insert_scraper_logs()
+def run():
+    status, row_id = database.insert_scraper_logs()
 
-if status == True:
-    site_id = []
-    web_url = []
-    novel_id_list = []
+    if status == True:
+        site_id = []
+        web_url = []
+        novel_id_list = []
 
-    websites_list = database.fetch_websites()
+        websites_list = database.fetch_websites()
 
-    for items in websites_list:
-        site_id.append(items['id'])
-        web_url.append(items['web_domain_name'])
+        for items in websites_list:
+            site_id.append(items['id'])
+            web_url.append(items['web_domain_name'])
 
-    with open('site_parse_rules.json', 'r') as file:
-        site_parse_rules = json.load(file)
+        with open('site_parse_rules.json', 'r') as file:
+            site_parse_rules = json.load(file)
 
-    updated_novel_list = finding_updated_novels(site_id, web_url, site_parse_rules)
+        updated_novel_list = finding_updated_novels(site_id, web_url, site_parse_rules)
 
-    database.update_novels_table(updated_novel_list)
+        database.update_novels_table(updated_novel_list)
 
-    for data in updated_novel_list:
-        novel_id_list.append(data['id'])
-    
-    subscribers_list = database.fetch_subscribers(novel_id_list)
+        for data in updated_novel_list:
+            novel_id_list.append(data['id'])
+        
+        subscribers_list = database.fetch_subscribers(novel_id_list)
 
-    database.update_scraper_logs(row_id)
+        database.update_scraper_logs(row_id)
+
+
+if __name__ == "__main__":
+       run()

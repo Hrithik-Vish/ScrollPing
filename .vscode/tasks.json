@@ -1,12 +1,11 @@
-
 {
   "version": "2.0.0",
   "tasks": [
     {
-    "label": "Docker: Run Current Python File",
-    "type": "process",
-    "command": "docker",
-    "args": [
+      "label": "Docker: Run Current Python File",
+      "type": "process",
+      "command": "docker",
+      "args": [
         "exec",
         "-w",
         "/app",
@@ -15,8 +14,8 @@
         "-c",
         "import runpy, sys; from pathlib import Path; runpy.run_path(str(Path('/app') / sys.argv[1].replace(chr(92), '/')), run_name='__main__')",
         "${relativeFile}"
-    ],
-    "problemMatcher": []
+      ],
+      "problemMatcher": []
     },
     {
       "label": "Docker: Run Pytest",
@@ -32,6 +31,97 @@
         "pytest"
       ],
       "problemMatcher": []
+    },
+    {
+      "label": "Docker: Pytest Verbose",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-w",
+        "/app",
+        "scrollping-dev",
+        "python",
+        "-m",
+        "pytest",
+        "-v"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Pytest Stop At First Failure",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-w",
+        "/app",
+        "scrollping-dev",
+        "python",
+        "-m",
+        "pytest",
+        "-x",
+        "-v"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Pytest Last Failed",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-w",
+        "/app",
+        "scrollping-dev",
+        "python",
+        "-m",
+        "pytest",
+        "--lf",
+        "-v"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Pytest Current File",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-w",
+        "/app",
+        "scrollping-dev",
+        "python",
+        "-c",
+        "import sys, pytest; sys.exit(pytest.main([sys.argv[1].replace(chr(92), '/'), '-v']))",
+        "${relativeFile}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker: Pytest By Keyword",
+      "type": "process",
+      "command": "docker",
+      "args": [
+        "exec",
+        "-w",
+        "/app",
+        "scrollping-dev",
+        "python",
+        "-m",
+        "pytest",
+        "-v",
+        "-k",
+        "${input:pytestKeyword}"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pytestKeyword",
+      "type": "promptString",
+      "description": "Run tests whose name contains (e.g. asura, retry, compilation)"
     }
   ]
 }
