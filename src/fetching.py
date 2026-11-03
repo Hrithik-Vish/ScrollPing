@@ -1,3 +1,4 @@
+# to control and run the files using docker, use ctrl + alt + 1 key to run and ctrl + alt + 2 to run pytest
 import requests
 
 def fetch_html(url):

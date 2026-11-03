@@ -8,3 +8,4 @@ docker-output/
 .vscode/*
 !.vscode/tasks.json
 docs/.obsidian/
+for_claude.txt

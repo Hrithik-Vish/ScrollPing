@@ -32,13 +32,13 @@ def compilation_fnct(parsing_data, fetched_novels, rules):
     original_latest = {name: info["latest_chap"] for name, info in fetched_novels.items()}
 
     for data in parsing_data:
-        split_url = data.split("/")
+        split_url = data.strip("/").split("/")
 
         if len(split_url) != rules["segment_count"]:
             skipped.append(data)
             continue
 
-        chap_match = re.compile(rules["chapter_regex"]).search(split_url[-1])
+        chap_match = re.compile(rules["chapter_regex"]).search("/".join(split_url[-2:]))
         if not chap_match:
             skipped.append(data)
             continue
