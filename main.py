@@ -2,10 +2,12 @@ import time
 import re
 import json
 import sys
+import traceback
 from src import database
 from src import fetching
 from src import parsing
 from src import telegramMessenger
+from telegram.error import InvalidToken
 from urllib.parse import urljoin
 
 def finding_updated_novels(site_id_list, web_url_list, site_parse_rules):
@@ -131,6 +133,12 @@ def group_subscribers(subscribers_list, updated_novel_list):
 
     return user_tele_dict
 
+def print_send_summary(summary):
+    print(
+        f"telegram: sent={summary['sent']} blocked={len(summary['blocked'])} "
+        f"bad_request={len(summary['bad_request'])} failed={len(summary['failed'])}"
+    )
+
 
 def run():
     status, row_id = database.insert_scraper_logs()
@@ -158,6 +166,25 @@ def run():
         
         subscribers_list = database.fetch_subscribers(novel_id_list)
         user_tele_dict = group_subscribers(subscribers_list, updated_novel_list)
+
+        notify_failed = False
+        try:
+            send_summary = telegramMessenger.send_all(user_tele_dict)
+            print_send_summary(send_summary)
+        except InvalidToken:
+            print("telegram: bot token was rejected, no notifications were sent")
+            notify_failed = True
+        except RuntimeError as exc:
+            print(f"telegram: not configured: {exc}")
+            notify_failed = True
+        except Exception:
+            traceback.print_exc()
+            notify_failed = True
+
+        database.update_scraper_logs(row_id)
+
+        if notify_failed:
+            sys.exit(1)
 
         database.update_scraper_logs(row_id)
 
