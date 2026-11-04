@@ -1,6 +1,7 @@
 import copy
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -212,6 +213,53 @@ def test_compilation_asura_strips_hash_and_reads_chapter(asura_rules):
     assert updated[0]["latest_chap"] == 11
 
 
+def test_compilation_chapter_url_is_absolute(hive_rules, novels):
+    updated, _ = main.compilation_fnct(
+        ["/series/solo-leveling/chapter-11"], novels, hive_rules
+    )
+    assert updated[0]["chapter_url"] == (
+        "https://hivetoons.org/series/solo-leveling/chapter-11"
+    )
+
+
+def test_compilation_asura_output_url_has_no_hash(asura_rules):
+    fetched = {"solo-leveling": {"id": 1, "latest_chap": 10, "chapter_url": "old"}}
+    updated, _ = main.compilation_fnct(
+        ["/comics/solo-leveling-1a2b3c4d/chapter/11"], fetched, asura_rules
+    )
+    url = updated[0]["chapter_url"]
+    assert url == "https://asurascans.com/comics/solo-leveling/chapter/11"
+    assert "1a2b3c4d" not in url
+
+
+def test_compilation_vortex_apostrophe_slug_survives():
+    rules = REAL_RULES["https://vortexscans.org/"]
+    fetched = {"the-hero's-ballad": {"id": 1, "latest_chap": 11, "chapter_url": "old"}}
+    updated, _ = main.compilation_fnct(
+        ["/series/the-hero's-ballad/chapter-12"], fetched, rules
+    )
+    assert updated[0]["chapter_url"] == (
+        "https://vortexscans.org/series/the-hero's-ballad/chapter-12"
+    )
+
+
+def test_compilation_missing_base_url_raises(hive_rules, novels):
+    rules = {k: v for k, v in hive_rules.items() if k != "base_url"}
+    with pytest.raises(KeyError):
+        main.compilation_fnct(["/series/solo-leveling/chapter-11"], novels, rules)
+
+
+def test_real_rules_base_urls_are_clean():
+    """Guards against config typos: base_url is host-only and matches the site."""
+    for site_url, rules in REAL_RULES.items():
+        if rules["mode"] not in ("html", "html_li_block"):
+            continue  # MangaDex has no base_url yet
+        base = urlparse(rules["base_url"])
+        assert base.scheme == "https"
+        assert base.path == ""  # no trailing slash, no path
+        assert base.netloc == urlparse(site_url).netloc
+
+
 # ---------------------------------------------------------------------------
 # process_website (fetching / parsing / database are all faked)
 # ---------------------------------------------------------------------------
@@ -318,7 +366,7 @@ def test_real_hivetoons_part_chapter_picks_next_whole_chapter():
     updated, _ = main.compilation_fnct(links, fetched, REAL_RULES["https://hivetoons.org/"])
 
     assert updated[0]["latest_chap"] == 631
-    assert updated[0]["chapter_url"] == "/series/lookism/chapter-631"
+    assert updated[0]["chapter_url"] == "https://hivetoons.org/series/lookism/chapter-631"
 
 
 # ---------------------------------------------------------------------------

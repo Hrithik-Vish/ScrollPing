@@ -6,6 +6,7 @@ from src import database
 from src import fetching
 from src import parsing
 from src import telegramMessenger
+from urllib.parse import urljoin
 
 def finding_updated_novels(site_id_list, web_url_list, site_parse_rules):
     updated_novel_list = []
@@ -49,14 +50,18 @@ def compilation_fnct(parsing_data, fetched_novels, rules):
         strip_regex = rules.get("slug_hash_strip_regex")
         if strip_regex:
             name = re.sub(strip_regex, "", name)
+            split_url[1] = name
 
         if name not in fetched_novels:
             skipped.append(data)
             continue
 
+        path = "/" + "/".join(split_url)
+        chapter_url = urljoin(rules["base_url"], path)
+
         if chap > float(fetched_novels[name]["latest_chap"]):
             fetched_novels[name]["latest_chap"] = chap
-            fetched_novels[name]["chapter_url"] = data
+            fetched_novels[name]["chapter_url"] = chapter_url
 
     for name, info in fetched_novels.items():
         if float(info["latest_chap"]) > float(original_latest[name]):
