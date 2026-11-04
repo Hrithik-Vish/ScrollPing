@@ -186,8 +186,6 @@ def run():
         if notify_failed:
             sys.exit(1)
 
-        database.update_scraper_logs(row_id)
-
     else:
         print("could not insert into scraper_logs, stopping the run")
         sys.exit(1)
