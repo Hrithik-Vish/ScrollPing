@@ -21,7 +21,12 @@ CHAPTER_REGEX = r"chapter[/-](\d+(\.\d+)?)"
 @pytest.fixture
 def hive_rules():
     # hivetoons / kunmanga / vortexscans style: series/{slug}/chapter-{n}
-    return {"mode": "html", "segment_count": 3, "chapter_regex": CHAPTER_REGEX}
+    return {
+        "mode": "html",
+        "segment_count": 3,
+        "chapter_regex": CHAPTER_REGEX,
+        "base_url": "https://hivetoons.org",
+    }
 
 
 @pytest.fixture
@@ -32,6 +37,8 @@ def asura_rules():
         "segment_count": 4,
         "chapter_regex": CHAPTER_REGEX,
         "slug_hash_strip_regex": r"-[a-f0-9]{8}$",
+        "slug_hash_strip_regex": r"-[a-f0-9]{8}$",
+        "base_url": "https://asurascans.com",
     }
 
 
@@ -112,7 +119,7 @@ def test_compilation_simple_update(hive_rules, novels):
     assert len(updated) == 1
     assert updated[0]["novel_name"] == "solo-leveling"
     assert updated[0]["latest_chap"] == 11
-    assert updated[0]["chapter_url"] == "/series/solo-leveling/chapter-11"
+    assert updated[0]["chapter_url"] == "https://hivetoons.org/series/solo-leveling/chapter-11"
     assert novels["solo-leveling"]["latest_chap"] == 11  # mutated in place
 
 
@@ -130,7 +137,7 @@ def test_compilation_picks_highest_chapter_regardless_of_order(hive_rules, novel
 
     assert len(updated) == 1
     assert updated[0]["latest_chap"] == 12
-    assert updated[0]["chapter_url"] == "/series/solo-leveling/chapter-12"
+    assert updated[0]["chapter_url"] == "https://hivetoons.org/series/solo-leveling/chapter-12"
 
 
 def test_compilation_handles_fractional_chapters(hive_rules, novels):
@@ -292,6 +299,7 @@ def test_process_website_happy_path(fake_pipeline, site_parse_rules):
     assert len(rows) == 1
     assert rows[0]["novel_name"] == "solo-leveling"
     assert rows[0]["latest_chap"] == 11
+    assert rows[0]["chapter_url"] == "https://hivetoons.org/series/solo-leveling/chapter-11"
 
 
 def test_process_website_returns_empty_when_fetch_fails(monkeypatch, fake_pipeline, site_parse_rules):
@@ -376,8 +384,8 @@ def test_real_hivetoons_part_chapter_picks_next_whole_chapter():
 @pytest.fixture
 def updated_novels():
     return [
-        {"id": 3, "novel_name": "lookism", "latest_chap": 631, "chapter_url": "/series/lookism/chapter-631"},
-        {"id": 5, "novel_name": "solo-swordmaster", "latest_chap": 25, "chapter_url": "/series/solo-swordmaster/chapter-25"},
+        {"id": 3, "novel_name": "lookism", "latest_chap": 631, "chapter_url": "https://hivetoons.org/series/lookism/chapter-631"},
+        {"id": 5, "novel_name": "solo-swordmaster", "latest_chap": 25, "chapter_url": "https://hivetoons.org/series/solo-swordmaster/chapter-25"},
     ]
 
 
@@ -408,7 +416,7 @@ def test_group_subscribers_values_are_the_full_novel_rows(updated_novels):
         "id": 3,
         "novel_name": "lookism",
         "latest_chap": 631,
-        "chapter_url": "/series/lookism/chapter-631",
+        "chapter_url": "https://hivetoons.org/series/lookism/chapter-631",
     }
 
 
