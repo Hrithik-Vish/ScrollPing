@@ -111,11 +111,10 @@ def insert_scraper_logs():
     status = False
     row_id = None
 
-    for attempt in range(1, max_attempts +1):
+    for attempt in range(1, max_attempts + 1):
         print(f"inserting into scraper_logs, attempt: {attempt}")
 
         try:
-
             timestamptz = datetime.now(timezone.utc).isoformat()
             insert_scraper_log = (
                 supabase.table("scraper_logs").insert({"last_run_timestamp": timestamptz}).execute()
@@ -132,11 +131,10 @@ def insert_scraper_logs():
                 print(f"insert operation failed, trying again. error: {e}")
                 time.sleep(5)
             else:
-                print(f"all attempts failed, scraper cannot run further, please try againg later. error: {e}")
-                return []
-    
-    return status, row_id
+                print(f"all attempts failed, scraper cannot run further, please try again later. error: {e}")
+                return False, None
 
+    return status, row_id
 
 
 def update_scraper_logs(row_id):

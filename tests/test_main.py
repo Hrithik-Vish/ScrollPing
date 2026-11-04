@@ -319,3 +319,103 @@ def test_real_hivetoons_part_chapter_picks_next_whole_chapter():
 
     assert updated[0]["latest_chap"] == 631
     assert updated[0]["chapter_url"] == "/series/lookism/chapter-631"
+
+
+# ---------------------------------------------------------------------------
+# group_subscribers
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def updated_novels():
+    return [
+        {"id": 3, "novel_name": "lookism", "latest_chap": 631, "chapter_url": "/series/lookism/chapter-631"},
+        {"id": 5, "novel_name": "solo-swordmaster", "latest_chap": 25, "chapter_url": "/series/solo-swordmaster/chapter-25"},
+    ]
+
+
+def sub(novel_id, telegram_id):
+    """Build a subscriber row in the shape fetch_subscribers returns."""
+    return {"novel_id": novel_id, "users": {"telegram_user_id": telegram_id}}
+
+
+def test_group_subscribers_batches_one_user_across_novels(updated_novels):
+    result = main.group_subscribers([sub(3, "111"), sub(5, "111")], updated_novels)
+
+    assert result == {"111": [updated_novels[0], updated_novels[1]]}
+
+
+def test_group_subscribers_separate_users_get_separate_lists(updated_novels):
+    result = main.group_subscribers([sub(3, "111"), sub(5, "111"), sub(3, "222")], updated_novels)
+
+    assert result == {
+        "111": [updated_novels[0], updated_novels[1]],
+        "222": [updated_novels[0]],
+    }
+
+
+def test_group_subscribers_values_are_the_full_novel_rows(updated_novels):
+    result = main.group_subscribers([sub(3, "111")], updated_novels)
+
+    assert result["111"][0] == {
+        "id": 3,
+        "novel_name": "lookism",
+        "latest_chap": 631,
+        "chapter_url": "/series/lookism/chapter-631",
+    }
+
+
+def test_group_subscribers_accepts_integer_telegram_ids(updated_novels):
+    # docs/database.md shows telegram_user_id as an int; either type works as a dict key
+    result = main.group_subscribers([sub(3, 123456)], updated_novels)
+
+    assert list(result) == [123456]
+
+
+def test_group_subscribers_empty_subscribers_returns_empty_dict(updated_novels):
+    assert main.group_subscribers([], updated_novels) == {}
+
+
+def test_group_subscribers_empty_updates_returns_empty_dict():
+    assert main.group_subscribers([sub(3, "111")], []) == {}
+
+
+@pytest.mark.parametrize(
+    "bad_row",
+    [
+        {"novel_id": 3, "users": None},                         # user row missing from the join
+        {"novel_id": 3},                                        # no users key at all
+        {"novel_id": 3, "users": {}},                           # users present but empty
+        {"novel_id": 3, "users": {"telegram_user_id": None}},   # NULL telegram id
+        {"novel_id": 3, "users": {"telegram_user_id": ""}},     # empty-string telegram id
+        {"novel_id": 999, "users": {"telegram_user_id": "111"}},  # novel not in today's updates
+        {"users": {"telegram_user_id": "111"}},                 # no novel_id at all
+    ],
+    ids=["users-none", "no-users-key", "users-empty", "id-none", "id-empty", "unknown-novel", "no-novel-id"],
+)
+def test_group_subscribers_skips_unusable_rows(updated_novels, bad_row):
+    assert main.group_subscribers([bad_row], updated_novels) == {}
+
+
+def test_group_subscribers_bad_row_does_not_affect_good_rows(updated_novels):
+    rows = [{"novel_id": 3, "users": None}, sub(3, "111"), sub(999, "111")]
+
+    assert main.group_subscribers(rows, updated_novels) == {"111": [updated_novels[0]]}
+
+
+def test_group_subscribers_does_not_mutate_inputs(updated_novels):
+    rows = [sub(3, "111"), sub(5, "222")]
+    rows_before = copy.deepcopy(rows)
+    novels_before = copy.deepcopy(updated_novels)
+
+    main.group_subscribers(rows, updated_novels)
+
+    assert rows == rows_before
+    assert updated_novels == novels_before
+
+
+def test_group_subscribers_duplicate_rows_are_not_deduplicated(updated_novels):
+    # Documents CURRENT behaviour: the same (user, novel) row twice gives two entries.
+    # If you add a unique constraint in the DB, or dedupe in the function, change this test.
+    result = main.group_subscribers([sub(3, "111"), sub(3, "111")], updated_novels)
+
+    assert result == {"111": [updated_novels[0], updated_novels[0]]}

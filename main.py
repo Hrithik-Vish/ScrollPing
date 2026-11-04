@@ -1,6 +1,7 @@
 import time
 import re
 import json
+import sys
 from src import database
 from src import fetching
 from src import parsing
@@ -99,6 +100,33 @@ def process_website(site_id, web_url, site_parse_rules):
     return updated_rows
 
 
+def group_subscribers(subscribers_list, updated_novel_list):
+    novel_lookup = {
+        novel["id"]: novel
+        for novel in updated_novel_list
+    }
+
+    user_tele_dict = {}
+
+    for row in subscribers_list:
+        novel_id = row.get("novel_id")
+        user_data = row.get("users") or {}
+
+        telegram_id = user_data.get("telegram_user_id")
+
+        if not telegram_id:
+            continue
+
+        novel_data = novel_lookup.get(novel_id)
+
+        if novel_data is None:
+            continue
+
+        user_tele_dict.setdefault(telegram_id, []).append(novel_data)
+
+    return user_tele_dict
+
+
 def run():
     status, row_id = database.insert_scraper_logs()
 
@@ -124,9 +152,14 @@ def run():
             novel_id_list.append(data['id'])
         
         subscribers_list = database.fetch_subscribers(novel_id_list)
+        user_tele_dict = group_subscribers(subscribers_list, updated_novel_list)
 
         database.update_scraper_logs(row_id)
 
+    else:
+        print("could not insert into scraper_logs, stopping the run")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-       run()
+   run()
