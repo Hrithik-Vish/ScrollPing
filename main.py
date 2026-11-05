@@ -155,6 +155,7 @@ def print_send_summary(summary):
     )
 
 
+
 def run():
     status, row_id = database.insert_scraper_logs()
 
@@ -176,15 +177,14 @@ def run():
 
         failToUpdate_list = database.update_novels_table(updated_novel_list)
 
-        if failToUpdate_list is None:
-            failToUpdate_list = []
+        failToUpdate_list = failToUpdate_list or []
 
         failToUpdate_set = set(failToUpdate_list)
         updated_novel_list = [items for items in updated_novel_list if items not in failToUpdate_set]
 
         for data in updated_novel_list:
             novel_id_list.append(data['id'])
-        
+
         subscribers_list = database.fetch_subscribers(novel_id_list)
         user_tele_dict = group_subscribers(subscribers_list, updated_novel_list)
 
