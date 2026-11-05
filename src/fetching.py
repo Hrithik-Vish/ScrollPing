@@ -1,31 +1,35 @@
 # to control and run the files using docker, use ctrl + alt + 1 key to run and ctrl + alt + 2 to run pytest
 import requests
 
-def fetch_html(url):
-    try:
-        user_agent_header = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, timeout= (5, 30), headers=user_agent_header)
-        if response.ok:
-            print("pass")
-            return response.text
-        else:
-            print("there was a problem, resturned status code: ",response.status_code)
-            return ""
+# Temporary problems on the site's side (or rate limiting) that are worth retrying.
+RETRYABLE_STATUS_CODES = (429, 500, 502, 503, 504)
 
-    except requests.exceptions.ConnectTimeout:
-        print("connection timeout")
-        print("fail")
-        return ""
-    except requests.exceptions.ConnectionError:
-        print("connection error")
-        print("fail")
-        return ""
-    except requests.exceptions.RequestException as error:
-        print("details: ", error)
-        print("fail")
-        return ""
+# Return the page HTML for `url`.
+
+# This function does not swallow temporary failures, because retry() in main.py
+# can only retry something that raises:
+#     * network problems (timeout, connection error, ...) propagate as requests exceptions
+#     * temporary HTTP statuses (429 and 5xx) raise requests.exceptions.HTTPError
+# Permanent HTTP errors (403, 404, ...) are printed and return "", since retrying
+# them will not help.
+
+def fetch_html(url):
+    user_agent_header = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+    }
+    response = requests.get(url, timeout=(5, 30), headers=user_agent_header)
+
+    if response.ok:
+        print("pass")
+        return response.text
+
+    if response.status_code in RETRYABLE_STATUS_CODES:
+        raise requests.exceptions.HTTPError(
+            f"temporary error, status code {response.status_code}", response=response
+        )
+
+    print("there was a problem, returned status code: ", response.status_code)
+    return ""
 
 
 # this is for testing the function
@@ -55,7 +59,3 @@ def fetch_html(url):
 #     {"site_name": "vortexscans", "url": "https://vortexscans.org/", "priority": "secondary", "mode": "html"},
 # ]
 # -------------------------------------------------------------------------------------------------------------
-    
-
-
-

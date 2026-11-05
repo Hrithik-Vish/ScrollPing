@@ -10,10 +10,18 @@ from src import telegramMessenger
 from telegram.error import InvalidToken
 from urllib.parse import urljoin
 
+# Modes that process_website/compilation_fnct can handle today.
+# html_li_block (mgeko) and json (mangadex) get added here once they are implemented.
+SUPPORTED_MODES = ("html",)
+
 def finding_updated_novels(site_id_list, web_url_list, site_parse_rules):
     updated_novel_list = []
     for site_id, web_url in zip(site_id_list, web_url_list):
-        updated_novel_list.extend(process_website(site_id, web_url, site_parse_rules))
+        try:
+            updated_novel_list.extend(process_website(site_id, web_url, site_parse_rules))
+        except Exception:
+            print(f"{site_id}: {web_url}: unexpected error, skipping this site for this run")
+            traceback.print_exc()
     return updated_novel_list
 
 
@@ -80,6 +88,14 @@ def compilation_fnct(parsing_data, fetched_novels, rules):
 def process_website(site_id, web_url, site_parse_rules):
     max_attempts = 3
 
+    site_rules = site_parse_rules.get(web_url)
+    if site_rules is None:
+        print(f"{site_id}: {web_url}: no parse rules found, skipping")
+        return []
+    if site_rules.get("mode") not in SUPPORTED_MODES:
+        print(f"{site_id}: {web_url}: mode '{site_rules.get('mode')}' is not supported yet, skipping")
+        return []
+
     html_structure = retry(fetching.fetch_html, max_attempts, web_url)
     if not html_structure:
         return []
@@ -97,7 +113,6 @@ def process_website(site_id, web_url, site_parse_rules):
         for novel in novels_list
     }
 
-    site_rules = site_parse_rules[web_url]
     updated_rows, skipped = compilation_fnct(parsing_data, fetched_novels, site_rules)
 
     if skipped:
