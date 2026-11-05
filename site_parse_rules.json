@@ -31,6 +31,7 @@
     "identity_attr": "href",
     "chapter_text_selector": "h5.chapter-title",
     "chapter_regex": "Chapter\\s+(\\d+(?:-\\d+)?)",
+    "chapter_url_template": "/reader/en/{slug}-chapter-{chapter}-eng-li/",
     "base_url": "https://www.mgeko.cc"
   },
   "https://api.mangadex.org/chapter?includes[]=manga&order[publishAt]=desc&limit=32&offset=0": {

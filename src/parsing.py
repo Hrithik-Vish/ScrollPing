@@ -17,6 +17,27 @@ def parse_html(file):
     return html_data
 
 
+def parse_html_li_block(file, rules):
+    soup = BeautifulSoup(file, "lxml")
+
+    blocks = []
+
+    for item in soup.select(rules["item_selector"]):
+        identity_tag = item.select_one(rules["identity_selector"])
+        chapter_tag = item.select_one(rules["chapter_text_selector"])
+
+        if identity_tag is None or chapter_tag is None:
+            continue
+
+        identity = identity_tag.get(rules["identity_attr"])
+        chapter_text = chapter_tag.get_text(strip=True)
+
+        if identity and chapter_text:
+            blocks.append({"identity": identity, "chapter_text": chapter_text})
+
+    return blocks
+
+
 
 
 # this is for testing the function

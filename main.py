@@ -8,11 +8,11 @@ from src import fetching
 from src import parsing
 from src import telegramMessenger
 from telegram.error import InvalidToken
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
-# Modes that process_website/compilation_fnct can handle today.
-# html_li_block (mgeko) and json (mangadex) get added here once they are implemented.
-SUPPORTED_MODES = ("html",)
+# Modes that process_website can handle today.
+# json (mangadex) gets added here once it is implemented.
+SUPPORTED_MODES = ("html", "html_li_block")
 
 def finding_updated_novels(site_id_list, web_url_list, site_parse_rules):
     updated_novel_list = []
@@ -73,6 +73,13 @@ def compilation_fnct(parsing_data, fetched_novels, rules):
             fetched_novels[name]["latest_chap"] = chap
             fetched_novels[name]["chapter_url"] = chapter_url
 
+    return collect_updated_rows(fetched_novels, original_latest), skipped
+
+
+# Shared by every compilation function: after the scan loop has pushed newer chapters
+# into fetched_novels, compare against the snapshot taken before the loop.
+def collect_updated_rows(fetched_novels, original_latest):
+    updated_rows = []
     for name, info in fetched_novels.items():
         if float(info["latest_chap"]) > float(original_latest[name]):
             updated_rows.append({
@@ -81,8 +88,34 @@ def compilation_fnct(parsing_data, fetched_novels, rules):
                 "latest_chap": info["latest_chap"],
                 "chapter_url": info["chapter_url"]
             })
+    return updated_rows
 
-    return updated_rows, skipped
+
+def compilation_fnct_li_block(parsing_data, fetched_novels, rules):
+    skipped = []
+    original_latest = {name: info["latest_chap"] for name, info in fetched_novels.items()}
+
+    for block in parsing_data:
+        identity = block.get("identity")
+        chapter_text = block.get("chapter_text")
+
+        slug_parts = urlparse(identity or "").path.strip("/").split("/")
+        slug = slug_parts[-1]
+        chap_match = re.compile(rules["chapter_regex"]).search(chapter_text or "")
+
+        if not slug or not chap_match or slug not in fetched_novels:
+            skipped.append(f"{identity} | {chapter_text}")
+            continue
+
+        token = chap_match.group(1)
+        chap = float(token.replace("-", "."))
+
+        if chap > float(fetched_novels[slug]["latest_chap"]):
+            path = rules["chapter_url_template"].format(slug=slug, chapter=token)
+            fetched_novels[slug]["latest_chap"] = chap
+            fetched_novels[slug]["chapter_url"] = urljoin(rules["base_url"], path)
+
+    return collect_updated_rows(fetched_novels, original_latest), skipped
 
 
 def process_website(site_id, web_url, site_parse_rules):
@@ -100,7 +133,12 @@ def process_website(site_id, web_url, site_parse_rules):
     if not html_structure:
         return []
 
-    parsing_data = parsing.parse_html(html_structure)
+    if site_rules["mode"] == "html_li_block":
+        parsing_data = parsing.parse_html_li_block(html_structure, site_rules)
+        compile_fnct = compilation_fnct_li_block
+    else:
+        parsing_data = parsing.parse_html(html_structure)
+        compile_fnct = compilation_fnct
     if not parsing_data:
         return []
 
@@ -113,7 +151,7 @@ def process_website(site_id, web_url, site_parse_rules):
         for novel in novels_list
     }
 
-    updated_rows, skipped = compilation_fnct(parsing_data, fetched_novels, site_rules)
+    updated_rows, skipped = compile_fnct(parsing_data, fetched_novels, site_rules)
 
     if skipped:
         for data in skipped:

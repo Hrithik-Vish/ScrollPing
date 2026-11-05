@@ -60,7 +60,7 @@ def test_process_website_skips_a_site_with_no_rules_before_fetching(pipeline, ca
     assert "no parse rules" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("mode", ["html_li_block", "json", None], ids=["li-block", "json", "no-mode"])
+@pytest.mark.parametrize("mode", ["json", None], ids=["json", "no-mode"])
 def test_process_website_skips_unsupported_modes_before_fetching(pipeline, capsys, mode):
     rules = {"https://x.org/": {"chapter_regex": "x", "base_url": "https://x.org"}}
     if mode is not None:
@@ -73,16 +73,16 @@ def test_process_website_skips_unsupported_modes_before_fetching(pipeline, capsy
 
 def test_real_non_html_sites_are_skipped_without_any_fetch(pipeline):
     skipped_urls = [url for url, rules in REAL_RULES.items() if rules["mode"] not in main.SUPPORTED_MODES]
-    assert skipped_urls  # mgeko and mangadex, until they are implemented
+    assert skipped_urls  # mangadex, until it is implemented
 
     for url in skipped_urls:
         assert main.process_website(1, url, REAL_RULES) == []
     assert pipeline["fetch"] == []
 
 
-def test_real_html_sites_are_not_skipped(pipeline):
+def test_real_supported_sites_are_not_skipped(pipeline):
     html_urls = [url for url, rules in REAL_RULES.items() if rules["mode"] in main.SUPPORTED_MODES]
-    assert len(html_urls) == 4
+    assert len(html_urls) == 5  # four html sites + mgeko (html_li_block)
 
     for url in html_urls:
         main.process_website(1, url, REAL_RULES)
