@@ -176,6 +176,9 @@ def run():
 
         failToUpdate_list = database.update_novels_table(updated_novel_list)
 
+        if failToUpdate_list is None:
+            failToUpdate_list = []
+
         failToUpdate_set = set(failToUpdate_list)
         updated_novel_list = [items for items in updated_novel_list if items not in failToUpdate_set]
 
