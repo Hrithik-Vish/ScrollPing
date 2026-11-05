@@ -180,7 +180,7 @@ def run():
         failToUpdate_list = failToUpdate_list or []
 
         failToUpdate_set = set(failToUpdate_list)
-        updated_novel_list = [items for items in updated_novel_list if items not in failToUpdate_set]
+        updated_novel_list = [items for items in updated_novel_list if items["id"] not in failToUpdate_set]
 
         for data in updated_novel_list:
             novel_id_list.append(data['id'])
