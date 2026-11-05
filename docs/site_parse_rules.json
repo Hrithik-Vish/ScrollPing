@@ -3,22 +3,26 @@
     "mode": "html",
     "segment_count": 4,
     "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
-    "slug_hash_strip_regex": "-[a-f0-9]{8}$"
+    "slug_hash_strip_regex": "-[a-f0-9]{8}$",
+    "base_url": "https://asurascans.com"
   },
   "https://hivetoons.org/": {
     "mode": "html",
     "segment_count": 3,
-    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
+    "base_url": "https://hivetoons.org"
   },
   "https://www.kunmanga.online/": {
     "mode": "html",
     "segment_count": 3,
-    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
+    "base_url": "https://www.kunmanga.online"
   },
   "https://vortexscans.org/": {
     "mode": "html",
     "segment_count": 3,
-    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)"
+    "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
+    "base_url": "https://vortexscans.org"
   },
   "https://www.mgeko.cc/jumbo/manga/": {
     "mode": "html_li_block",
@@ -26,7 +30,8 @@
     "identity_selector": "a.list-body",
     "identity_attr": "href",
     "chapter_text_selector": "h5.chapter-title",
-    "chapter_regex": "Chapter\\s+(\\d+(\\.\\d+)?)"
+    "chapter_regex": "Chapter\\s+(\\d+(?:-\\d+)?)",
+    "base_url": "https://www.mgeko.cc"
   },
   "https://api.mangadex.org/chapter?includes[]=manga&order[publishAt]=desc&limit=32&offset=0": {
     "mode": "json",
