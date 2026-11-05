@@ -174,7 +174,10 @@ def run():
 
         updated_novel_list = finding_updated_novels(site_id, web_url, site_parse_rules)
 
-        database.update_novels_table(updated_novel_list)
+        failToUpdate_list = database.update_novels_table(updated_novel_list)
+
+        failToUpdate_set = set(failToUpdate_list)
+        updated_novel_list = [items for items in updated_novel_list if items not in failToUpdate_set]
 
         for data in updated_novel_list:
             novel_id_list.append(data['id'])
