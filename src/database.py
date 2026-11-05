@@ -93,8 +93,8 @@ def update_novels_table(updated_novel_list):
                 timestamptz = datetime.now(timezone.utc).isoformat()
                 update_novels = (
                     supabase.table("novels").update({"latest_chap": novels["latest_chap"],"chapter_url": novels["chapter_url"], "updated_at": timestamptz}).eq("id", novels["id"]).execute()
-                    break
                 )
+                break
                 
             except Exception as e:
                 if attempt < max_attempts:
