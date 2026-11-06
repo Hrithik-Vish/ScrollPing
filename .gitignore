@@ -9,3 +9,4 @@ docker-output/
 !.vscode/tasks.json
 docs/.obsidian/
 for_claude.txt
+throwaway_script.py
