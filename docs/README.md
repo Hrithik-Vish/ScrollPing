@@ -4,7 +4,7 @@
 
 A Python scraper that watches manga / manhwa / manhua / novel aggregator sites for new chapter releases and sends Telegram alerts to the people following those titles, plus a Telegram bot (`@ScrollPingBot`) where people sign up and manage the novels they follow. It is built to run entirely within free-tier limits.
 
-> **Status:** 🚧 V1 nearly complete. The full pipeline (scrape → compare → update database → notify subscribers) works end to end for 5 of the 6 target sites, and the Telegram bot (sign-up, add by pasted link, list, status, remove, pause, delete) is built and live-tested. 349 automated tests pass in CI. Still to do for V1: the scheduled GitHub Actions run, deploying the always-on bot, and a security review.
+> **Status:** 🚧 V1 nearly complete. The full pipeline (scrape → compare → update database → notify subscribers) works end to end for 5 of the 6 target sites, and the Telegram bot (sign-up, add by pasted link, list, status, remove, pause, delete) is built and live-tested. 381 automated tests pass in CI. The scraper runs on a GitHub Actions schedule and the bot deploys to a Render free web service (see [`docs/deployment.md`](docs/deployment.md)). Still to do for V1: a security review before opening it to other people.
 
 ## Why I built this
 
@@ -21,7 +21,7 @@ ScrollPing is my first independent project outside of coursework: an attempt to 
 - Bounded retries on network and database calls, with permanent errors (403/404) not retried
 - Telegram sending is rate-limit aware, retries network failures, and never lets a notification problem block the run's final status
 - Designed to stay within free-tier limits: batched database calls and one message per user
-- 349 automated tests (pytest) run on every push through GitHub Actions
+- 381 automated tests (pytest) run on every push through GitHub Actions
 
 ## How it works
 
@@ -103,12 +103,15 @@ ScrollPing/
 │   ├── telegramMessenger.py   # build_message, send_all, retry queue (outgoing alerts)
 │   ├── bot.py                 # Telegram command handler: long polling, commands, buttons
 │   ├── novel_links.py         # pasted link -> (site, slug), pure
-│   └── ratelimiter.py         # per-user token bucket for incoming messages
-├── tests/                     # 349 tests + a manual Telegram smoke test
+│   ├── ratelimiter.py         # per-user token bucket for incoming messages
+│   └── health.py              # tiny /health endpoint for the bot's host
+├── render.yaml                # Render Blueprint for the bot's web service
+├── .github/workflows/         # tests.yml (CI), scraper.yml (scheduled scraper run)
+├── tests/                     # 381 tests + a manual Telegram smoke test
 │   ├── fixtures/real_links.json
 │   └── test_*.py
 ├── docs/                      # Obsidian-style notes on each module (main, database, schema, fetching,
-│                              #   parsing, telegramMessenger, bot, novel_links, ratelimiter, pytest)
+│                              #   parsing, telegramMessenger, bot, novel_links, ratelimiter, deployment, pytest)
 ├── .github/workflows/tests.yml  # pytest on every push and pull request
 ├── .vscode/tasks.json         # run files/tests inside the dev container
 ├── pytest.ini
@@ -168,10 +171,19 @@ Run the bot (stays running; send `/start` to your bot in Telegram):
 python -m src.bot
 ```
 
+Only one process can poll Telegram per bot token at a time, so stop a local bot before starting a deployed one. If `HEALTH_PORT` (or `PORT`, which Render sets) is present, the bot also serves a `/health` page for hosts and timers; with neither set, no port is opened.
+
+### Deployment
+
+- **Scraper:** `.github/workflows/scraper.yml` runs `main.py` on GitHub Actions. cron-job.org starts it every hour through GitHub's API (a fine-grained token limited to this repository with only the Actions permission), and GitHub's own schedule is kept as a backup. Add the repository secrets `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`.
+- **Bot:** `render.yaml` is a Render Blueprint for a free web service that redeploys when CI passes (enter the four environment variables in the Render dashboard). The free plan sleeps after 15 minutes without requests, so a timer (cron-job.org) requests the bot's `/health` page every 5 minutes; it also alerts if the bot stops.
+
+Step by step, with the caveats: [`docs/deployment.md`](docs/deployment.md).
+
 ## Testing
 
 ```bash
-python -m pytest            # 349 passed, 2 skipped
+python -m pytest            # 381 passed, 2 skipped
 ```
 
 - No real credentials are needed: `tests/conftest.py` sets dummy values and every external call (HTTP, Supabase, Telegram) is faked.
@@ -202,7 +214,8 @@ More detail in `docs/pytest.md`.
 
 - Notifications show slugs (`the-forgotten-field`) rather than display titles.
 - MangaDex is not scraped yet.
-- There is no scheduled workflow yet, so scraper runs are started manually, and the bot has no host yet (it runs locally).
+- Alerts can lag by up to about an hour (the scraper runs hourly). GitHub's own schedule is only a backup because it is best effort and is switched off after 60 days without repository activity; the primary trigger is cron-job.org, which depends on a GitHub token that expires (at most after a year).
+- The bot depends on a free Render service plus a timer that pings it every 5 minutes to stay awake, and shares Render's 750 free hours a month with any other free service in the workspace; free-tier rules can change.
 - A novel is only confirmed when it appears on its site's latest-updates page, so a real but quiet novel shows "waiting for first update" until its next release, and a typo'd slug waits there until the 97-day cleanup removes it.
 - The 20-novel cap is checked in code, not by a database trigger.
 - mgeko sub-chapters of 10 or more (`26-10`) compare as `26.1`.
@@ -221,13 +234,13 @@ More detail in `docs/pytest.md`.
 - [x] `run()` wiring with fatal-error handling and a non-zero exit code
 - [x] Per-site isolation and mode guards
 - [x] GitHub Actions CI for the tests
+- [x] Scheduled GitHub Actions workflow for the scraper
+- [x] Deployment of the always-on bot to Render, with a health endpoint for the keep-awake timer and monitoring
 - [x] mgeko (`html_li_block`) parsing and compilation
 - [x] Telegram command handler: sign-up, add by link, list, status, remove, pause, delete, rate limiting
-- [x] 349-test suite and a manual smoke test
+- [x] 381-test suite and a manual smoke test
 
 **Next (V1)**
-- [ ] Scheduled GitHub Actions workflow for the scraper (repository secrets for Supabase and the bot token)
-- [ ] Deploy the always-on bot process
 - [ ] Security pass (RLS review, secrets handling) before opening it to other people
 
 **Deferred (V2 and later)**

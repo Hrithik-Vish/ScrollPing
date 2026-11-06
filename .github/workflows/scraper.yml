@@ -1,16 +1,24 @@
 name: scraper
+run-name: "scraper (${{ github.event_name }})"
 
 # Runs one scrape-and-notify pass of main.py.
 #
-# GitHub's schedule trigger is best effort: runs start late under load (the top of every
-# hour is the worst time), a slot can be dropped, and gaps of an hour or more happen.
-# That is safe here because every run compares against the database and only notifies
-# on a change, so a missed slot just delays detection; it never double-sends.
-# Minutes are chosen off the :00 peak on purpose. Cron times are UTC.
+# TRIGGERS
+#   workflow_dispatch  the PRIMARY trigger: cron-job.org calls GitHub's API once an hour
+#                      (minute 5). API-started runs skip the queue that delays and drops
+#                      GitHub's own scheduled runs, and this is also the "Run workflow" button.
+#   schedule           a BACKUP at minute 35 of every hour. GitHub's schedule is best effort
+#                      (late starts, dropped slots, and it is switched off after 60 days
+#                      without repository activity), so it only has to catch the odd miss.
+#                      "scraper (schedule)" vs "scraper (workflow_dispatch)" in the run list
+#                      shows which trigger started a run. Cron times are UTC.
+#
+# Running twice an hour is safe: every run compares against the database and only notifies
+# on a change, so a second run right after the first finds nothing new and never double-sends.
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "17,47 * * * *"
-  workflow_dispatch:        # "Run workflow" button, for manual runs and testing
+    - cron: "35 * * * *"
 
 permissions:
   contents: read

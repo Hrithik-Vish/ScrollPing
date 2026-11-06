@@ -1,6 +1,6 @@
 # Testing (pytest) and CI
 
-**State:** 349 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in a few seconds, needs no real credentials, never touches the network.
+**State:** 381 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in a few seconds, needs no real credentials, never touches the network.
 
 ## Layout
 ```
@@ -17,7 +17,8 @@ tests/
 ├── test_novel_links.py         # pasted link -> (site, slug), against the real rules file
 ├── test_ratelimiter.py         # token bucket with a fake clock
 ├── test_bot_database.py        # bot-side database functions against a scripted fake Supabase
-├── test_bot.py                 # bot helpers and every handler with fake Telegram objects
+├── test_bot.py                 # bot helpers, every handler, lifecycle and HEALTH_PORT wiring
+├── test_health.py              # the /health endpoint, with real HTTP requests on a free local port
 └── test_smokeTest.py           # MANUAL, sends real messages (skipped by default)
 ```
 `pytest.ini` lives in the **root** on purpose. A `pytest.ini` inside `tests/` is ignored when the root has one, which is how `pythonpath = .` was once silently lost (plain `pytest` failed with `No module named 'src'` while `python -m pytest` happened to work).
@@ -48,7 +49,8 @@ tests/
 - **`test_novel_links.py`** — supported links per site, harmless variations (no scheme, `www`, case, port, query), rejections (lookalike hosts, `user@host` tricks, wrong schemes, bad slugs, too long), the asura hash never reaching the stored slug, hash stripping only for sites that have the rule and matching the scraper's.
 - **`test_ratelimiter.py`** — burst, warn-once-then-drop, refill, capacity cap, separate users, purge of idle users.
 - **`test_bot_database.py`** — `fetch_subscribers` filters paused users; `create_user` (placeholder email, orphan cleanup, races); status and delete; website recreation; `subscribe_user_to_novel` (new/existing novel, no `latest_chap` in the insert, already subscribed, cap, races); list, remove and status change with ownership filters.
-- **`test_bot.py`** — helpers (`chapter_text` with `-1`, formatting), `process_add` for every outcome, `/start` for new/existing/paused users, `/add` flows, pickers, every callback including foreign and garbage ids, `/stop`, the rate gate (private chats only, warn once, buttons), the error handler, application wiring, and logging not leaking the bot token.
+- **`test_health.py`** — 503 until the bot is running, 200 after, HEAD, query strings, unknown paths and POST refused, nothing leaked in headers or logs.
+- **`test_bot.py`** — helpers (`chapter_text` with `-1`, formatting), `process_add` for every outcome, `/start` for new/existing/paused users, `/add` flows, pickers, every callback including foreign and garbage ids, `/stop`, the rate gate (private chats only, warn once, buttons), the error handler, application wiring, logging not leaking the bot token, and the hosting hooks (`post_init`/`post_shutdown`, `HEALTH_PORT`/`PORT` parsing and precedence, `main()` starting the health server only when asked).
 
 ## Manual smoke test
 `tests/test_smokeTest.py` sends real messages to your own chat. It needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` and is skipped unless `RUN_SMOKE_TESTS=1` is set in the shell:

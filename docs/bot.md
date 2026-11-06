@@ -1,11 +1,11 @@
 # bot.py — Telegram command handler
 
-**Status:** built and live-tested (Nov 2026): `/start`, `/add`, `/list`, `/remove`, `/status`, `/stop`, `/help`, `/cancel`, duplicate adds, pausing, deleting and re-creating an account. Covered by [[pytest]] (`tests/test_bot.py`, 88 tests). Not deployed yet: it needs an always-on host.
+**Status:** built and live-tested (Nov 2026): `/start`, `/add`, `/list`, `/remove`, `/status`, `/stop`, `/help`, `/cancel`, duplicate adds, pausing, deleting and re-creating an account. Covered by [[pytest]] (`tests/test_bot.py`, 110 tests, and `tests/test_health.py`, 10). Deployment to Render is set up, see [[deployment]].
 
 ## Purpose
 The people-facing half of ScrollPing. [[main]] runs on a schedule and only *sends* alerts ([[telegramMessenger]]); `bot.py` is a separate, always-running process that *receives* commands so people can sign up and manage the novels they follow without anyone touching the database by hand.
 
-Run it with `python -m src.bot` (needs `TELEGRAM_BOT_TOKEN` and the three `SUPABASE_*` variables). It uses **long polling**: the process keeps asking Telegram for new messages, so it needs no public URL. Telegram identifies every sender with a numeric `telegram_user_id` it vouches for, so `/start` registers someone with no password or phone step.
+Run it with `python -m src.bot` (needs `TELEGRAM_BOT_TOKEN` and the three `SUPABASE_*` variables). It uses **long polling**: the process keeps asking Telegram for new messages, so it needs no public URL. It also serves a `/health` page (`src/health.py`) when `HEALTH_PORT` (or `PORT`, which Render sets) is present, for hosts that need a listening port and for the timer that keeps a free host awake (details in [[deployment]]); with neither set, no port is opened. Only one process may poll per bot token at a time. Telegram identifies every sender with a numeric `telegram_user_id` it vouches for, so `/start` registers someone with no password or phone step.
 
 ## Commands
 | Command | What it does |
@@ -32,7 +32,8 @@ Replies: added, already following, limit reached (20), or one of several specifi
 - **Plain helpers** (no Telegram objects, no I/O): `process_add`, `format_subscriptions`, `chapter_text`, `sites_text`, `display_name`, `parse_uuid`, keyboard builders. This is what most tests hit.
 - **Handlers** are thin: they call [[database]] and [[novel_links]]. Blocking database calls run through `asyncio.to_thread` so one slow query cannot freeze the bot for everybody.
 - **`MESSAGES`** at the top holds every user-facing text, so the wording can be rewritten in one place (final wording is planned once everything works).
-- **`build_application(token, rules)`** wires everything and is what the tests inspect; `main()` configures logging and calls `run_polling`.
+- **`build_application(token, rules)`** wires everything and is what the tests inspect; `main()` configures logging, starts the health server when `HEALTH_PORT` or `PORT` is set (a bad value fails fast with a message naming the variable) and calls `run_polling`.
+- **Lifecycle:** `post_init` publishes the command menu (a failure there is logged, not fatal) and marks the bot as running for `/health`; `post_shutdown` clears it.
 
 ## Inline buttons
 All buttons go through one router, `on_callback`. Callback data (Telegram allows 64 bytes; the longest here is 41):
@@ -69,4 +70,4 @@ All buttons go through one router, `on_callback`. Callback data (Telegram allows
 - Incoming-message throttling state is in memory too, which is fine for a single process.
 
 ## Related notes
-[[novel_links]] · [[ratelimiter]] · [[database]] · [[telegramMessenger]] · [[main]] · [[schema]] · [[pytest]]
+[[novel_links]] · [[ratelimiter]] · [[database]] · [[telegramMessenger]] · [[main]] · [[schema]] · [[deployment]] · [[pytest]]

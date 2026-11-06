@@ -1,0 +1,25 @@
+# Render Blueprint for the Telegram bot (src/bot.py), the always-on half of ScrollPing.
+# The scraper (main.py) is not here: it runs on GitHub Actions (.github/workflows/scraper.yml).
+#
+# Render serves the bot's /health page on $PORT (10000 by default) and src/bot.py reads PORT.
+# On the free plan the service sleeps after 15 minutes without inbound requests, so an
+# external timer must request /health every 5 minutes (see docs/deployment.md).
+# The Python version comes from .python-version.
+services:
+  - type: web
+    name: scrollping-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.bot
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass     # deploy only when the repository's CI (tests.yml) is green
+    envVars:                          # values are entered in the Render dashboard, never committed
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false

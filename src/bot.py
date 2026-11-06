@@ -29,6 +29,7 @@ Layout
 import asyncio
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -48,6 +49,7 @@ from telegram.ext import (
 )
 
 from src import database, novel_links
+from src.health import STATUS, start_health_server
 from src.ratelimiter import TokenBucketLimiter
 from src.telegramMessenger import get_token
 
@@ -473,11 +475,20 @@ async def on_error(update, context):
 
 
 async def post_init(application):
-    await application.bot.set_my_commands([BotCommand(name, description) for name, description in BOT_COMMANDS])
+    # the command menu is a nicety: a transient Telegram error here must not stop the bot starting
+    try:
+        await application.bot.set_my_commands([BotCommand(name, description) for name, description in BOT_COMMANDS])
+    except Exception:
+        logger.warning("could not publish the command menu; continuing without it", exc_info=True)
+    STATUS.set_running(True)
+
+
+async def post_shutdown(application):
+    STATUS.set_running(False)
 
 
 def build_application(token, rules):
-    application = Application.builder().token(token).post_init(post_init).build()
+    application = Application.builder().token(token).post_init(post_init).post_shutdown(post_shutdown).build()
     application.bot_data["rules"] = rules
     application.bot_data["limiter"] = TokenBucketLimiter(capacity=5, refill_per_second=0.5, warn_cooldown=10)
 
@@ -510,9 +521,37 @@ def configure_logging():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def health_port_from_env():
+    """The port for the health endpoint, or None to open no port.
+
+    HEALTH_PORT wins; otherwise PORT, which hosting platforms such as Render set for web
+    services and expect the app to listen on. Neither set (a normal local run) = no port."""
+    name, raw = None, ""
+    for candidate in ("HEALTH_PORT", "PORT"):
+        value = os.getenv(candidate, "").strip()
+        if value:
+            name, raw = candidate, value
+            break
+    if name is None:
+        return None
+    try:
+        port = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from None
+    if not 0 < port < 65536:
+        raise ValueError(f"{name} must be between 1 and 65535, got {port}")
+    return port
+
+
 def main():
     configure_logging()
     application = build_application(get_token(), load_rules())
+
+    port = health_port_from_env()
+    if port is not None:
+        start_health_server(STATUS, port)
+        logger.info("health endpoint listening on port %s", port)
+
     application.run_polling(allowed_updates=["message", "callback_query"])
 
 

@@ -652,3 +652,137 @@ def test_an_httpx_info_line_with_the_token_is_not_emitted_after_configure_loggin
     with caplog.at_level(logging.INFO):
         logging.getLogger("httpx").info("HTTP Request: POST https://api.telegram.org/bot123:SECRET/getUpdates")
     assert "SECRET" not in caplog.text
+
+
+# ------------------------------------------------------------------ hosting: health endpoint wiring
+
+def test_post_init_publishes_the_menu_and_marks_the_bot_running():
+    from src.health import STATUS
+    STATUS.set_running(False)
+    calls = []
+
+    class FakeBot:
+        async def set_my_commands(self, commands):
+            calls.append(commands)
+
+    run(bot.post_init(SimpleNamespace(bot=FakeBot())))
+
+    assert STATUS.running is True
+    assert [c.command for c in calls[0]] == [name for name, description in bot.BOT_COMMANDS]
+
+
+def test_post_init_survives_a_failing_command_menu_and_still_marks_running():
+    from src.health import STATUS
+    STATUS.set_running(False)
+
+    class BrokenBot:
+        async def set_my_commands(self, commands):
+            raise RuntimeError("telegram hiccup")
+
+    run(bot.post_init(SimpleNamespace(bot=BrokenBot())))        # must not raise
+    assert STATUS.running is True
+
+
+def test_post_shutdown_marks_the_bot_not_running():
+    from src.health import STATUS
+    STATUS.set_running(True)
+    run(bot.post_shutdown(SimpleNamespace()))
+    assert STATUS.running is False
+
+
+def test_application_registers_the_lifecycle_hooks():
+    application = bot.build_application("123:ABC", RULES)
+    assert application.post_init is bot.post_init
+    assert application.post_shutdown is bot.post_shutdown
+
+
+@pytest.mark.parametrize("raw, expected", [(None, None), ("", None), ("  ", None), ("7860", 7860), (" 8080 ", 8080)])
+def test_health_port_from_env(monkeypatch, raw, expected):
+    monkeypatch.delenv("PORT", raising=False)
+    if raw is None:
+        monkeypatch.delenv("HEALTH_PORT", raising=False)
+    else:
+        monkeypatch.setenv("HEALTH_PORT", raw)
+    assert bot.health_port_from_env() == expected
+
+
+def test_health_port_falls_back_to_the_port_variable_hosts_like_render_set(monkeypatch):
+    monkeypatch.delenv("HEALTH_PORT", raising=False)
+    monkeypatch.setenv("PORT", "10000")
+    assert bot.health_port_from_env() == 10000
+
+
+def test_health_port_wins_over_port(monkeypatch):
+    monkeypatch.setenv("HEALTH_PORT", "7860")
+    monkeypatch.setenv("PORT", "10000")
+    assert bot.health_port_from_env() == 7860
+
+
+def test_a_blank_health_port_still_falls_back_to_port(monkeypatch):
+    monkeypatch.setenv("HEALTH_PORT", "  ")
+    monkeypatch.setenv("PORT", "10000")
+    assert bot.health_port_from_env() == 10000
+
+
+def test_a_bad_port_variable_is_reported_by_name(monkeypatch):
+    monkeypatch.delenv("HEALTH_PORT", raising=False)
+    monkeypatch.setenv("PORT", "abc")
+    with pytest.raises(ValueError, match="PORT must be a number"):
+        bot.health_port_from_env()
+
+
+@pytest.mark.parametrize("raw", ["abc", "78.5", "0", "-1", "70000"])
+def test_health_port_from_env_rejects_bad_values_with_a_clear_message(monkeypatch, raw):
+    monkeypatch.setenv("HEALTH_PORT", raw)
+    with pytest.raises(ValueError, match="HEALTH_PORT"):
+        bot.health_port_from_env()
+
+
+class FakeApplication:
+    def __init__(self):
+        self.polled = None
+
+    def run_polling(self, **kwargs):
+        self.polled = kwargs
+
+
+def patch_main(monkeypatch):
+    app = FakeApplication()
+    started = []
+    monkeypatch.setattr(bot, "configure_logging", lambda: None)
+    monkeypatch.setattr(bot, "get_token", lambda: "123:ABC")
+    monkeypatch.setattr(bot, "load_rules", lambda: RULES)
+    monkeypatch.setattr(bot, "build_application", lambda token, rules: app)
+    monkeypatch.setattr(bot, "start_health_server", lambda status, port: started.append(port))
+    return app, started
+
+
+def test_main_opens_no_port_when_no_port_variable_is_set(monkeypatch):
+    monkeypatch.delenv("HEALTH_PORT", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+    app, started = patch_main(monkeypatch)
+    bot.main()
+    assert started == [] and app.polled["allowed_updates"] == ["message", "callback_query"]
+
+
+def test_main_starts_the_health_server_before_polling(monkeypatch):
+    monkeypatch.setenv("HEALTH_PORT", "7860")
+    app, started = patch_main(monkeypatch)
+    bot.main()
+    assert started == [7860] and app.polled is not None
+
+
+def test_main_listens_on_the_port_render_provides(monkeypatch):
+    monkeypatch.delenv("HEALTH_PORT", raising=False)
+    monkeypatch.setenv("PORT", "10000")
+    app, started = patch_main(monkeypatch)
+    bot.main()
+    assert started == [10000]
+
+
+def test_main_refuses_to_start_with_a_bad_health_port(monkeypatch):
+    monkeypatch.setenv("HEALTH_PORT", "nope")
+    app, started = patch_main(monkeypatch)
+    with pytest.raises(ValueError):
+        bot.main()
+    assert app.polled is None
