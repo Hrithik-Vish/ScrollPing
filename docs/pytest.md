@@ -1,6 +1,6 @@
 # Testing (pytest) and CI
 
-**State:** 146 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in about 2 seconds, needs no real credentials, never touches the network.
+**State:** 349 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in a few seconds, needs no real credentials, never touches the network.
 
 ## Layout
 ```
@@ -9,10 +9,15 @@ tests/
 ├── conftest.py                 # dummy env vars so `import main` works
 ├── fixtures/real_links.json    # hrefs captured from the live sites via parse_html
 ├── test_main.py                # retry, compilation_fnct, process_website, group_subscribers, real-link tests
+├── test_mgeko.py               # parse_html_li_block, compilation_fnct_li_block, mgeko through process_website
 ├── test_fetching.py            # fetch_html + retry working together
 ├── test_site_isolation.py      # mode guard and per-site isolation
 ├── test_run.py                 # how run() wires the Telegram step in
 ├── test_telegram_messenger.py  # the messenger module
+├── test_novel_links.py         # pasted link -> (site, slug), against the real rules file
+├── test_ratelimiter.py         # token bucket with a fake clock
+├── test_bot_database.py        # bot-side database functions against a scripted fake Supabase
+├── test_bot.py                 # bot helpers and every handler with fake Telegram objects
 └── test_smokeTest.py           # MANUAL, sends real messages (skipped by default)
 ```
 `pytest.ini` lives in the **root** on purpose. A `pytest.ini` inside `tests/` is ignored when the root has one, which is how `pythonpath = .` was once silently lost (plain `pytest` failed with `No module named 'src'` while `python -m pytest` happened to work).
@@ -26,17 +31,24 @@ tests/
 - **Everything external is faked.** `conftest.py` sets dummy `SUPABASE_*` values because `database.py` raises at import without them, plus `PTB_TIMEDELTA=1` so python-telegram-bot's `RetryAfter.retry_after` is a `timedelta` (no deprecation warnings; the code handles both forms).
 - **Fresh data per test.** `compilation_fnct` mutates `fetched_novels`, so fixtures return new dicts each time.
 - **Fakes, not mocks of internals:** a `FakeGet` for `requests.get`, a `FakeBot` for `telegram.Bot` that replays scripted outcomes, recorders for the database functions in `test_run.py`.
+- **A scripted fake Supabase** (`test_bot_database.py`): a queue of responses (rows, or an exception to raise) and a log of every call chain, so tests assert on exactly what was sent (which filters, which payload keys) without a database.
+- **Fake Telegram objects** (`test_bot.py`): small `FakeMessage` / `FakeCallbackQuery` classes and a `FakeDB` standing in for `database`, driven with `asyncio.run`. Handlers are tested end to end through those, including garbage and foreign callback data.
 - **No real waiting.** `main.time.sleep` and `asyncio.sleep` are patched; tests assert on the sleeps instead.
 - **Async code is driven with `asyncio.run`** inside plain tests — no extra plugin.
 - **Real data over invented data.** `real_links.json` plus the real `site_parse_rules.json` feed `test_real_*` tests; one guard test checks every `base_url` is host-only and matches its site.
-- **Check that tests can fail.** New tests were validated by putting the old buggy code back and watching them fail.
+- **Check that tests can fail.** New tests were validated by putting the old buggy code back and watching them fail. For the bot, the ownership filter on `remove_subscription` and the paused-user filter on `fetch_subscribers` were deliberately removed to confirm that tests go red.
 
 ## What is covered
 - **`test_main.py`** — `retry`; `compilation_fnct` (updates, ordering, fractional chapters, skipped links, string chapters from the DB, asura hash stripping, absolute hash-free URLs, apostrophes in slugs, missing `base_url`); `process_website` failure paths; `finding_updated_novels`; real captured links per site; `group_subscribers` (batching, bad rows, no mutation, duplicates).
 - **`test_fetching.py`** — success, headers and timeouts, network errors propagate, 429/5xx raise, 403/404 return `""`, and `retry` recovers after failures, gives up after 3, and doesn't repeat a 403.
-- **`test_site_isolation.py`** — no rules or unsupported mode → skipped before any fetch; real mgeko/mangadex rules are skipped, the 4 HTML sites are not; one crashing site doesn't stop the others; `KeyboardInterrupt` still propagates.
+- **`test_site_isolation.py`** — no rules or unsupported mode → skipped before any fetch; the real mangadex rules (mode `json`) are skipped, the 4 HTML sites and mgeko are not; one crashing site doesn't stop the others; `KeyboardInterrupt` still propagates.
 - **`test_run.py`** — order (DB update → send → log flip), grouped users reach `send_all`, send problems still flip the log then exit 1, no token in output, failed log insert stops everything, summary prints counts only.
 - **`test_telegram_messenger.py`** — see [[telegramMessenger]].
+- **`test_mgeko.py`** — parser (hrefs and text, order, blocks missing a part, empty pages); compiler (new chapter with reader URL, `26-3` → `26.3` with the dash kept in the URL, no update when not newer, highest wins for duplicates, untracked slugs skipped, malformed items, absolute hrefs); mgeko through `process_website`.
+- **`test_novel_links.py`** — supported links per site, harmless variations (no scheme, `www`, case, port, query), rejections (lookalike hosts, `user@host` tricks, wrong schemes, bad slugs, too long), the asura hash never reaching the stored slug, hash stripping only for sites that have the rule and matching the scraper's.
+- **`test_ratelimiter.py`** — burst, warn-once-then-drop, refill, capacity cap, separate users, purge of idle users.
+- **`test_bot_database.py`** — `fetch_subscribers` filters paused users; `create_user` (placeholder email, orphan cleanup, races); status and delete; website recreation; `subscribe_user_to_novel` (new/existing novel, no `latest_chap` in the insert, already subscribed, cap, races); list, remove and status change with ownership filters.
+- **`test_bot.py`** — helpers (`chapter_text` with `-1`, formatting), `process_add` for every outcome, `/start` for new/existing/paused users, `/add` flows, pickers, every callback including foreign and garbage ids, `/stop`, the rate gate (private chats only, warn once, buttons), the error handler, application wiring, and logging not leaking the bot token.
 
 ## Manual smoke test
 `tests/test_smokeTest.py` sends real messages to your own chat. It needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` and is skipped unless `RUN_SMOKE_TESTS=1` is set in the shell:
@@ -52,11 +64,14 @@ docker exec -e RUN_SMOKE_TESTS=1 -w /app scrollping-dev python -m pytest tests/t
 - A site without `segment_count` in its rules could crash the whole run.
 - Notifications went out for novels whose DB write had failed.
 - `pytest.ini` config in `tests/` was silently ignored.
+- A null `latest_chap` (a novel created by the bot before its first scrape) would have crashed `float(None)` and silenced that whole site every run; fixed with a `not null default -1` column.
+- `httpx` logged the Telegram bot token inside every request URL at INFO level (spotted in the first live run); the bot now keeps those loggers quiet and a test pins it.
+- A hash-like slug test case was wrong on the first try (`ab39de10` without the dash isn't stripped), which pinned down exactly what `slug_hash_strip_regex` matches.
 
 ## Not built yet
 - A scheduled workflow for the scraper itself (needs repository secrets for Supabase and the bot token).
-- Tests for the bot command handler (`/start`, `/add`) — the handler doesn't exist yet.
-- Tests for mgeko's `html_li_block` mode — they arrive with the implementation.
+- Tests for the not-yet-implemented MangaDex `json` mode.
+- Anything against the real Telegram or Supabase services besides the manual smoke test; the bot was checked live by hand.
 
 ## Related notes
-[[main]] · [[fetching]] · [[telegramMessenger]] · [[database]]
+[[main]] · [[fetching]] · [[telegramMessenger]] · [[database]] · [[bot]] · [[novel_links]] · [[ratelimiter]]

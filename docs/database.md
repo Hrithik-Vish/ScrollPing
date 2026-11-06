@@ -1,7 +1,11 @@
 # database.py
 
 ## Purpose
-Supabase data-access layer for ScrollPing. Every function follows the same shape: retry-with-backoff loop around a Supabase call, uniform empty-list-on-failure return, and prints for run-time visibility (no exceptions escape to the caller).
+Supabase data-access layer for ScrollPing, used by two different programs:
+- the **scraper** (`main.py`): retry-with-backoff loops around Supabase calls, uniform empty-list-on-failure returns, prints for run-time visibility, no exceptions escape to the caller (everything down to `update_scraper_logs`, below);
+- the **Telegram command handler** ([[bot]]): the `get_user` … `set_subscription_status` functions at the end of the file. These behave differently on purpose, see "Bot-side functions".
+
+All database access goes through functions in this file; nothing else talks to Supabase.
 
 ## Setup
 - Loads `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` from `.env`; raises `ValueError` immediately if any are missing.
@@ -17,9 +21,11 @@ Supabase data-access layer for ScrollPing. Every function follows the same shape
 
 ## Tables the code touches (columns used)
 - `websites` — `id`, `web_domain_name` (the exact URL string, also the key in [[site_parse_rules.json]])
-- `novels` — `id`, `web_id`, `novel_name` (**the slug**, e.g. `the-forgotten-field`), `latest_chap`, `chapter_url` (absolute URL), `updated_at`
-- `users` — `telegram_user_id`
-- `user_subscriptions` — `user_id`, `novel_id`, `reading_status`; UNIQUE index on `(user_id, novel_id)`, so duplicate subscriber rows cannot occur
+- `novels` — `id`, `web_id`, `novel_name` (**the slug**, e.g. `the-forgotten-field`), `latest_chap` (`numeric(7,2)`, `not null default -1`: `-1` means "not scraped yet"), `chapter_url` (absolute URL), `updated_at`; UNIQUE on `(web_id, novel_name)`
+- `users` — `id` (the Supabase auth user id), `username`, `telegram_user_id` (UNIQUE), `status` (`active` / `paused`)
+- `user_subscriptions` — `user_id`, `novel_id`, `reading_status` (`reading`, `completed`, `left`, `on hiatus`); UNIQUE index on `(user_id, novel_id)`, so duplicate subscriber rows cannot occur
+
+Full SQL, RLS and cleanup jobs: [[schema]].
 - `scraper_logs` — `id`, `last_run_timestamp`, `run_status` (defaults to `fail`; flipped to `success` as the last step of a run)
 
 ## Functions
@@ -58,11 +64,25 @@ Supabase data-access layer for ScrollPing. Every function follows the same shape
 
 ### `fetch_subscribers(novel_id_list)`
 - 5 attempts (highest of any function) — by this point in the run, all the expensive upstream work (scraping, comparing, finding updates) is already done. If this fails, the entire run's output is wasted, so it's worth retrying hard rather than giving up early.
-- Nested select join: `novel_id, users(telegram_user_id)` from `user_subscriptions`, filtered with `.in_("novel_id", novel_id_list)` and `.eq("reading_status", "reading")`.
+- Nested select join: `novel_id, users!inner(telegram_user_id)` from `user_subscriptions`, filtered with `.in_("novel_id", novel_id_list)`, `.eq("reading_status", "reading")` and `.eq("users.status", "active")`. The `!inner` join plus the embedded filter is what makes **paused users receive nothing**; the returned shape is unchanged.
 - **Returns (example):** `[{"novel_id": 1, "users": {"telegram_user_id": "123456"}}, ...]` — `users` is a nested dict per row (not flattened). The id may come back as a string or an int; both work as chat ids.
 - Bulk operation by design (vs. per-site functions above) — see Key learnings.
 - Feeds `group_subscribers` in [[main|main.py]], which groups the rows by Telegram id for [[telegramMessenger]].
 - It is called even when no novel was updated (empty `novel_id_list`); a guard in `run()` would save one query on quiet runs.
+
+## Bot-side functions (used by [[bot]])
+Unlike the scraper functions above, these **do not retry and do not hide failures**: a database error is raised, and the bot's error handler tells the user something went wrong. This matters because "user not found" (`None`) and "the database is down" (an exception) must never look the same, or an outage would make the bot try to register people who already exist.
+
+- **`get_user(telegram_user_id)`** → the `users` row (`id, username, telegram_user_id, status`) or `None`.
+- **`create_user(telegram_user_id, username)`** → creates the Supabase **auth user first** (`users.id` references `auth.users`) with a placeholder email `tg<id>@scrollping.invalid` and `email_confirm: true`, then inserts the `users` row with that id. Supabase refuses to create an auth user without an email or phone, and the bot has neither; no password is set and the `.invalid` domain can never receive mail. If the `users` insert fails, the auth user is deleted again so no orphan is left; a unique violation (two simultaneous registrations) returns the existing row.
+- **`set_user_status(user_id, status)`** → `active` / `paused` (anything else raises `ValueError` without a query). Returns whether a row was updated.
+- **`delete_user_account(user_id)`** → deletes the auth user; `auth.users → users → user_subscriptions` all cascade, so nothing else needs deleting. Orphaned novels are removed by the weekly cleanup job.
+- **`get_or_create_website(web_domain_name)`** → id. The key comes from `site_parse_rules.json` (trusted config, never user input). The weekly job deletes websites without novels, so the row can be missing even for a supported site; it is simply recreated.
+- **`subscribe_user_to_novel(user_id, web_domain_name, slug, max_subscriptions)`** → `"added"`, `"already_subscribed"` or `"limit_reached"`. Order: count the user's subscriptions → get/create the website → look the novel up (without creating it) → already subscribed? → at the cap? → create the novel → insert the subscription. Checking the cap before creating anything means a refused add leaves no orphan novel, and an already-followed novel is still reported as followed when the user is at the cap. New novels are inserted **without `latest_chap`** (sending `None` would write a real null and skip the `-1` column default) and with `updated_at = now()`, so the 97-day cleanup can eventually remove a slug that never turns out to be real. Unique violations (races) are treated as success.
+- **`list_subscriptions(user_id)`** → flat rows `{id, reading_status, novel_name, latest_chap, web_domain_name}`, sorted by name.
+- **`remove_subscription(user_id, subscription_id)`** and **`set_subscription_status(user_id, subscription_id, status)`** → bool. Both filter on the subscription id **and** the user id. The secret key bypasses RLS, so this filter is the only thing stopping one user from touching another user's row. `set_subscription_status` rejects unknown statuses with `ValueError`.
+
+Known limitation: the 20-novel cap is checked in code, not by a database trigger, so two simultaneous adds could slip past it. The bot handles one update at a time, so this only matters if it is ever scaled out.
 
 ## Known quirks / open items
 - `update_novels_table` doesn't verify that a row was matched (see above).
@@ -74,4 +94,5 @@ Supabase data-access layer for ScrollPing. Every function follows the same shape
 - **Per-site vs. bulk failure isolation:** `fetch_novels`/`update_novels_table` operate per-item because a single failure is tolerable and retried next run. `fetch_subscribers` is bulk because a missed notification can't be "retried later" — the moment is gone.
 - **Retry attempt counts are deliberately tiered:** 2 (early, cheap-to-skip fetch) → 3 (default) → 5 (last step before the run's entire output would be wasted). Not arbitrary — reflects how much sunk work would be lost by giving up at that point.
 - **Subscriber vs. novel cardinality:** subscriber count is structurally smaller/rarer than novel count in isolation — one subscriber can follow many novels, but a novel with zero subscribers is a normal, valid state. This is part of why a failed subscriber fetch is treated as high-stakes (see `fetch_subscribers` above), not because subscribers are numerous.
-- **Retry loop convention:** `range(1, max_attempts + 1)` everywhere, `time.sleep(5)` between attempts — kept consistent across all functions for predictability.
+- **Retry loop convention:** `range(1, max_attempts + 1)` everywhere, `time.sleep(5)` between attempts — kept consistent across the scraper functions for predictability.
+- **Raise vs. return empty:** a batch job can shrug off a failed read and try again next run; an interactive bot must tell the person something went wrong, and must be able to tell "nothing there" from "couldn't look".

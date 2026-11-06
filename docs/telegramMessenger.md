@@ -1,7 +1,7 @@
 # telegramMessenger.py
 
 ## Purpose
-Sends each subscriber **one compiled message** listing the novels that updated this run, through the ScrollPing bot (`@ScrollPingBot`). It only *sends*: it does not read the DB and does not listen for commands (that is a separate, later piece). Called from [[main|run()]] after the DB update.
+Sends each subscriber **one compiled message** listing the novels that updated this run, through the ScrollPing bot (`@ScrollPingBot`). It only *sends*: it does not read the DB and does not listen for commands (that is the separate always-on [[bot]] process, which reuses `get_token()` from this module). Called from [[main|run()]] after the DB update.
 
 **Public entry point:** `send_all(user_tele_dict) -> summary`
 
