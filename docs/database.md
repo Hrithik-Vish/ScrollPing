@@ -82,7 +82,7 @@ Unlike the scraper functions above, these **do not retry and do not hide failure
 - **`list_subscriptions(user_id)`** → flat rows `{id, reading_status, novel_name, latest_chap, web_domain_name}`, sorted by name.
 - **`remove_subscription(user_id, subscription_id)`** and **`set_subscription_status(user_id, subscription_id, status)`** → bool. Both filter on the subscription id **and** the user id. The secret key bypasses RLS, so this filter is the only thing stopping one user from touching another user's row. `set_subscription_status` rejects unknown statuses with `ValueError`.
 
-Known limitation: the 20-novel cap is checked in code, not by a database trigger, so two simultaneous adds could slip past it. The bot handles one update at a time, so this only matters if it is ever scaled out.
+Known limitation: the 50-novel cap is checked in code, not by a database trigger, so two simultaneous adds could slip past it. The bot handles one update at a time, so this only matters if it is ever scaled out.
 
 ## Known quirks / open items
 - `update_novels_table` doesn't verify that a row was matched (see above).

@@ -4,7 +4,7 @@
 
 A Python scraper that watches manga / manhwa / manhua / novel aggregator sites for new chapter releases and sends Telegram alerts to the people following those titles, plus a Telegram bot (`@ScrollPingBot`) where people sign up and manage the novels they follow. It is built to run entirely within free-tier limits.
 
-> **Status:** 🚧 V1 nearly complete. The full pipeline (scrape → compare → update database → notify subscribers) works end to end for 5 of the 6 target sites, and the Telegram bot (sign-up, add by pasted link, list, status, remove, pause, delete) is built and live-tested. 381 automated tests pass in CI. The scraper runs on a GitHub Actions schedule and the bot deploys to a Render free web service (see [`docs/deployment.md`](docs/deployment.md)). Still to do for V1: a security review before opening it to other people.
+> **Status:** 🚧 V1 nearly complete. The full pipeline (scrape → compare → update database → notify subscribers) works end to end for 5 of the 6 target sites, and the Telegram bot (sign-up, add by pasted link, list, status, remove, pause, delete) is built and live-tested. 388 automated tests pass in CI. The scraper runs on a GitHub Actions schedule and the bot deploys to a Render free web service (see [`docs/deployment.md`](docs/deployment.md)). Still to do for V1: a security review before opening it to other people.
 
 ## Why I built this
 
@@ -16,12 +16,12 @@ ScrollPing is my first independent project outside of coursework: an attempt to 
 - Handles half-chapters (`66.5`) and builds absolute chapter links for each site
 - Sends **one batched Telegram message per subscriber** (split into numbered chunks if it gets long)
 - **A Telegram bot for self-service**: sign up with `/start`, follow a novel by pasting any link to it, and manage subscriptions with buttons (list, change reading status, remove, pause, delete account)
-- Bot hardening: private chats only, per-user rate limiting (token bucket), a 20-novel cap, strict link and input validation, ownership checks on every change
+- Bot hardening: private chats only, per-user rate limiting (token bucket), a 50-novel cap per user, strict link and input validation, ownership checks on every change
 - **Per-site error isolation**: a site that is down, blocked or broken is skipped; the rest of the run continues
 - Bounded retries on network and database calls, with permanent errors (403/404) not retried
 - Telegram sending is rate-limit aware, retries network failures, and never lets a notification problem block the run's final status
 - Designed to stay within free-tier limits: batched database calls and one message per user
-- 381 automated tests (pytest) run on every push through GitHub Actions
+- 388 automated tests (pytest) run on every push through GitHub Actions
 
 ## How it works
 
@@ -107,11 +107,11 @@ ScrollPing/
 │   └── health.py              # tiny /health endpoint for the bot's host
 ├── render.yaml                # Render Blueprint for the bot's web service
 ├── .github/workflows/         # tests.yml (CI), scraper.yml (scheduled scraper run)
-├── tests/                     # 381 tests + a manual Telegram smoke test
+├── tests/                     # 388 tests + a manual Telegram smoke test
 │   ├── fixtures/real_links.json
 │   └── test_*.py
 ├── docs/                      # Obsidian-style notes on each module (main, database, schema, fetching,
-│                              #   parsing, telegramMessenger, bot, novel_links, ratelimiter, deployment, pytest)
+│                              #   parsing, telegramMessenger, bot, novel_links, ratelimiter, deployment, pytest, security-review)
 ├── .github/workflows/tests.yml  # pytest on every push and pull request
 ├── .vscode/tasks.json         # run files/tests inside the dev container
 ├── pytest.ini
@@ -183,7 +183,7 @@ Step by step, with the caveats: [`docs/deployment.md`](docs/deployment.md).
 ## Testing
 
 ```bash
-python -m pytest            # 381 passed, 2 skipped
+python -m pytest            # 388 passed, 2 skipped
 ```
 
 - No real credentials are needed: `tests/conftest.py` sets dummy values and every external call (HTTP, Supabase, Telegram) is faked.
@@ -217,7 +217,7 @@ More detail in `docs/pytest.md`.
 - Alerts can lag by up to about an hour (the scraper runs hourly). GitHub's own schedule is only a backup because it is best effort and is switched off after 60 days without repository activity; the primary trigger is cron-job.org, which depends on a GitHub token that expires (at most after a year).
 - The bot depends on a free Render service plus a timer that pings it every 5 minutes to stay awake, and shares Render's 750 free hours a month with any other free service in the workspace; free-tier rules can change.
 - A novel is only confirmed when it appears on its site's latest-updates page, so a real but quiet novel shows "waiting for first update" until its next release, and a typo'd slug waits there until the 97-day cleanup removes it.
-- The 20-novel cap is checked in code, not by a database trigger.
+- The 50-novel cap (raised from 20 for the burn-in) is checked in code, not by a database trigger.
 - mgeko sub-chapters of 10 or more (`26-10`) compare as `26.1`.
 - Blocked users keep being messaged; they resume getting alerts if they come back.
 - A notification that fails all its in-run retries is not retried on a later run.
@@ -238,10 +238,10 @@ More detail in `docs/pytest.md`.
 - [x] Deployment of the always-on bot to Render, with a health endpoint for the keep-awake timer and monitoring
 - [x] mgeko (`html_li_block`) parsing and compilation
 - [x] Telegram command handler: sign-up, add by link, list, status, remove, pause, delete, rate limiting
-- [x] 381-test suite and a manual smoke test
+- [x] 388-test suite and a manual smoke test
 
 **Next (V1)**
-- [ ] Security pass (RLS review, secrets handling) before opening it to other people
+- [ ] Security pass (RLS review, secrets handling) before opening it to other people: the brief for the reviewer is [`docs/security-review.md`](docs/security-review.md)
 
 **Deferred (V2 and later)**
 - [ ] Display titles instead of slugs

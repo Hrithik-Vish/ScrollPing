@@ -1,6 +1,6 @@
 # Testing (pytest) and CI
 
-**State:** 381 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in a few seconds, needs no real credentials, never touches the network.
+**State:** 388 tests pass, 2 are skipped by design (manual Telegram smoke tests). Runs in a few seconds, needs no real credentials, never touches the network.
 
 ## Layout
 ```

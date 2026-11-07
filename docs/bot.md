@@ -1,6 +1,6 @@
 # bot.py — Telegram command handler
 
-**Status:** built and live-tested (Nov 2026): `/start`, `/add`, `/list`, `/remove`, `/status`, `/stop`, `/help`, `/cancel`, duplicate adds, pausing, deleting and re-creating an account. Covered by [[pytest]] (`tests/test_bot.py`, 110 tests, and `tests/test_health.py`, 10). Deployment to Render is set up, see [[deployment]].
+**Status:** built and live-tested (Nov 2026): `/start`, `/add`, `/list`, `/remove`, `/status`, `/stop`, `/help`, `/cancel`, duplicate adds, pausing, deleting and re-creating an account. Covered by [[pytest]] (`tests/test_bot.py`, 117 tests, and `tests/test_health.py`, 10). Deployment to Render is set up, see [[deployment]].
 
 ## Purpose
 The people-facing half of ScrollPing. [[main]] runs on a schedule and only *sends* alerts ([[telegramMessenger]]); `bot.py` is a separate, always-running process that *receives* commands so people can sign up and manage the novels they follow without anyone touching the database by hand.
@@ -26,7 +26,7 @@ Anything else gets a short hint: plain text without `/add` ("send /add first"), 
 2. `database.subscribe_user_to_novel` creates the website and novel rows if needed and links the user. A brand-new novel starts at `latest_chap = -1`.
 3. The next scraper run that sees the novel on the site's listing page fills in the real chapter and sends the first notification ([[main]]). A real but quiet novel simply waits until it next updates, and `/list` shows "waiting for first update".
 
-Replies: added, already following, limit reached (20), or one of several specific messages for a bad link (not a link, unsupported site plus the supported list, not a novel page, unreadable slug, too long).
+Replies: added, already following, limit reached (50), or one of several specific messages for a bad link (not a link, unsupported site plus the supported list, not a novel page, unreadable slug, too long).
 
 ## Layout
 - **Plain helpers** (no Telegram objects, no I/O): `process_add`, `format_subscriptions`, `chapter_text`, `sites_text`, `display_name`, `parse_uuid`, keyboard builders. This is what most tests hit.
@@ -53,7 +53,7 @@ All buttons go through one router, `on_callback`. Callback data (Telegram allows
 - **Private chats only.** `rate_gate` runs before every handler (handler group -1) and drops anything from groups or without a user, silently.
 - **Rate limiting.** One token bucket per user ([[ratelimiter]]): a burst of 5 is fine, then one message per 2 seconds. A user over the limit gets one "slow down" reply per 10 seconds, everything else is dropped before any database work. Button presses are answered with the warning as a pop-up instead of a message.
 - **Input limits.** Text over 300 characters is rejected before parsing; links are length-capped and matched against an allow-list of hosts; slugs must match `[a-z0-9-]+`.
-- **Identity and ownership.** The bot uses the Supabase **secret key**, which bypasses RLS. So identity comes only from `update.effective_user.id`, and every subscription change filters on both the subscription id and the user's id. At most 20 novels per user (`MAX_SUBSCRIPTIONS`).
+- **Identity and ownership.** The bot uses the Supabase **secret key**, which bypasses RLS. So identity comes only from `update.effective_user.id`, and every subscription change filters on both the subscription id and the user's id. At most 50 novels per user (`MAX_SUBSCRIPTIONS`, raised from 20 for the burn-in).
 - **No token in logs.** `httpx` logs every request URL at INFO and a Telegram URL contains the bot token, so `configure_logging()` keeps the `httpx` and `httpcore` loggers at WARNING. (Found in the first live run; the token was rotated.)
 - **Errors.** Any exception inside a handler is logged and the user sees a generic "something went wrong"; details never reach the chat.
 
@@ -64,7 +64,8 @@ All buttons go through one router, `on_callback`. Callback data (Telegram allows
 - Typing is kept to a minimum: only `/add` takes typed input, everything else is buttons.
 
 ## Known limitations
-- The 20-novel cap is enforced in code, not by a database trigger (see [[database]]).
+- The 50-novel cap is enforced in code, not by a database trigger (see [[database]]).
+- `/list` with many long names is split into several messages (Telegram allows 4096 characters per message); the buttons sit on the last one.
 - Chapter notifications show slugs, not titles (V2).
 - Per-user state for a pending `/add` lives in memory, so a restart forgets who was mid-flow (they just send `/add` again).
 - Incoming-message throttling state is in memory too, which is fine for a single process.

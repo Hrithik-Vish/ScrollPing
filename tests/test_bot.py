@@ -786,3 +786,59 @@ def test_main_refuses_to_start_with_a_bad_health_port(monkeypatch):
     with pytest.raises(ValueError):
         bot.main()
     assert app.polled is None
+
+
+# ------------------------------------------------------------------ the 50-novel cap and long /list output
+
+def test_the_cap_is_fifty_and_reaches_the_database_call(db):
+    assert bot.MAX_SUBSCRIPTIONS == 50
+    bot.process_add("user-1", "https://hivetoons.org/series/some-novel", RULES)
+    assert db.calls[0][1][-1] == 50
+
+
+def test_limit_message_names_the_current_cap(db):
+    db.add_result = "limit_reached"
+    reply, done = bot.process_add("user-1", "https://hivetoons.org/series/some-novel", RULES)
+    assert "50" in reply and done is True
+
+
+def test_split_text_keeps_short_text_whole():
+    assert bot.split_text("a\nb\nc") == ["a\nb\nc"]
+
+
+def test_split_text_breaks_between_lines_and_loses_nothing():
+    lines = [f"{i}. " + "x" * 90 for i in range(100)]
+    chunks = bot.split_text("\n".join(lines), limit=1000)
+    assert len(chunks) > 1
+    assert all(len(c) <= 1000 for c in chunks)
+    assert "\n".join(chunks).split("\n") == lines          # every line, in order, unbroken
+
+
+def test_split_text_cuts_a_single_oversized_line():
+    chunks = bot.split_text("start\n" + "y" * 250 + "\nend", limit=100)
+    assert all(len(c) <= 100 for c in chunks)
+    assert "".join(chunks).replace("\n", "") == "start" + "y" * 250 + "end"
+
+
+def test_list_with_fifty_long_names_fits_telegrams_limit_and_keeps_every_button(db):
+    db.subscriptions = [
+        sub(f"{i:08d}-1111-4111-8111-111111111111", name=("novel-" + str(i) + "-") + "a" * 130, chap=i)
+        for i in range(50)
+    ]
+    update = make_update()
+    run(bot.cmd_list(update, make_context()))
+
+    replies = update.effective_message.replies
+    assert len(replies) > 1                                       # the text really is too long for one message
+    assert all(len(text) <= 4096 for text, markup in replies)
+    assert all(markup is None for text, markup in replies[:-1])   # buttons only on the last message
+    assert len(keyboard_data(replies[-1][1])) == 50
+    joined = "\n".join(text for text, markup in replies)
+    assert "1. novel-0-" in joined and "50. novel-49-" in joined
+
+
+def test_remove_and_status_pickers_still_send_one_message(db):
+    db.subscriptions = [sub(f"{i:08d}-1111-4111-8111-111111111111", name=f"n{i}") for i in range(50)]
+    update = make_update()
+    run(bot.cmd_remove(update, make_context()))
+    assert len(update.effective_message.replies) == 1

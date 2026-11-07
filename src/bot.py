@@ -55,7 +55,8 @@ from src.telegramMessenger import get_token
 
 logger = logging.getLogger("scrollping.bot")
 
-MAX_SUBSCRIPTIONS = 20
+MAX_SUBSCRIPTIONS = 50       # raised from 20 for the burn-in
+MAX_LIST_CHUNK = 3500        # /list text is split below Telegram's 4096-character message limit
 MAX_INPUT_LEN = 300          # longer text is rejected before any parsing
 MAX_BUTTON_LABEL_LEN = 60
 RULES_PATH = Path(__file__).resolve().parent.parent / "site_parse_rules.json"
@@ -171,6 +172,28 @@ def format_subscriptions(rows):
             f"{chapter_text(row['latest_chap'])} - {row['reading_status']}"
         )
     return "\n".join(lines)
+
+
+def split_text(text, limit=MAX_LIST_CHUNK):
+    """Split text into chunks of at most `limit` characters, breaking only between lines
+    (a single line longer than the limit is cut). 50 subscriptions with long names can
+    exceed Telegram's 4096-character message limit, which would make /list fail."""
+    chunks, current, size = [], [], 0
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current:
+                chunks.append("\n".join(current))
+                current, size = [], 0
+            chunks.append(line[:limit])
+            line = line[limit:]
+        extra = len(line) + (1 if current else 0)
+        if current and size + extra > limit:
+            chunks.append("\n".join(current))
+            current, size, extra = [], 0, len(line)
+        current.append(line)
+        size += extra
+    chunks.append("\n".join(current))
+    return chunks
 
 
 def button_label(row):
@@ -338,7 +361,12 @@ async def send_picker(update, context, prefix, header, show_list=False):
     text = header
     if show_list:
         text = header + "\n\n" + format_subscriptions(rows)
-    await update.effective_message.reply_text(text, reply_markup=picker_keyboard(prefix, rows))
+
+    # the buttons go on the last message, so they sit right under the end of the list
+    chunks = split_text(text)
+    for chunk in chunks[:-1]:
+        await update.effective_message.reply_text(chunk)
+    await update.effective_message.reply_text(chunks[-1], reply_markup=picker_keyboard(prefix, rows))
 
 
 async def cmd_list(update, context):
