@@ -241,7 +241,7 @@ More detail in `docs/pytest.md`.
 - [x] 388-test suite and a manual smoke test
 
 **Next (V1)**
-- [ ] Security pass (RLS review, secrets handling) before opening it to other people: the brief for the reviewer is [`docs/security-review.md`](docs/security-review.md)
+- [ ] Security pass (RLS review, secrets handling) before opening it to other people: the brief for the reviewer is security-review.md
 
 **Deferred (V2 and later)**
 - [ ] Display titles instead of slugs
