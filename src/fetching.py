@@ -33,14 +33,14 @@ def fetch_html(url):
 
 
 # this is for testing the function
-# html_txt = fetch_html("https://asurascans.com/")
+html_txt = fetch_html("https://asurascans.com/")
 
-# if html_txt:
-#     with open("html_txt.txt", "w", encoding = "utf-8") as file:
-#         file.write(html_txt)
-#     print("data saved to html_txt sucessfully")
-# else: 
-#     print("cannot save data, no data fetched to save")
+if html_txt:
+    with open("html_txt.txt", "w", encoding = "utf-8") as file:
+        file.write(html_txt)
+    print("data saved to html_txt sucessfully")
+else: 
+    print("cannot save data, no data fetched to save")
 
 
 # -------------------------------------------------------------------------------------------------------------

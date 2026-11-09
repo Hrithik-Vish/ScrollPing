@@ -1,0 +1,30 @@
+name: runner-capture-test
+run-name: "runner-capture-test (${{ github.event_name }})"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run capture and sanity verification
+        run: python scripts/runner_capture_check.py
+
+      - name: Upload captured HTML artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runner-captured-html
+          path: captured_html/
+          retention-days: 7
