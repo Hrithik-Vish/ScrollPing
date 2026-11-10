@@ -1,43 +1,83 @@
 {
   "https://asurascans.com/": {
     "mode": "html",
+    "display_name": "Asura Scans",
     "segment_count": 4,
     "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
     "slug_hash_strip_regex": "-[a-f0-9]{8}$",
     "base_url": "https://asurascans.com",
     "novel_link_patterns": [
       "^/comics/(?P<slug>[^/]+)(?:/.*)?$"
-    ]
+    ],
+    "title_field": "comic_name",
+    "lock_detection": {
+      "type": "astro_island",
+      "component": "LatestUpdates",
+      "list_key": "chapters",
+      "fields": {
+        "public_url": "comic_public_url",
+        "slug": "comic_slug",
+        "chapter": "number",
+        "title": "comic_name",
+        "is_locked": "is_premium",
+        "published_at": "published_at",
+        "unlock_at": "early_access_until"
+      },
+      "fallback_window_hours": 6
+    },
+    "tier_labels": {
+      "standard": "Free reader",
+      "member": "Asura+ member"
+    }
   },
   "https://hivetoons.org/": {
     "mode": "html",
+    "display_name": "Hive Toons",
     "segment_count": 3,
     "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
     "base_url": "https://hivetoons.org",
     "novel_link_patterns": [
       "^/series/(?P<slug>[^/]+)(?:/.*)?$"
-    ]
+    ],
+    "title_selector": "a.line-clamp-2",
+    "title_attr": "title",
+    "lock_badge": {
+      "type": "html_class",
+      "locked_class": "paid-chapter-row",
+      "marker_selector": "svg.lucide-lock"
+    }
   },
   "https://www.kunmanga.online/": {
     "mode": "html",
+    "display_name": "KunManga",
     "segment_count": 3,
     "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
     "base_url": "https://www.kunmanga.online",
     "novel_link_patterns": [
       "^/manga/(?P<slug>[^/]+)(?:/.*)?$"
-    ]
+    ],
+    "title_selector": ".post-title a, h5.widget-title a"
   },
   "https://vortexscans.org/": {
     "mode": "html",
+    "display_name": "Vortex Scans",
     "segment_count": 3,
     "chapter_regex": "chapter[/-](\\d+(\\.\\d+)?)",
     "base_url": "https://vortexscans.org",
     "novel_link_patterns": [
       "^/series/(?P<slug>[^/]+)(?:/.*)?$"
-    ]
+    ],
+    "title_selector": "a.line-clamp-2",
+    "title_attr": "title",
+    "lock_badge": {
+      "type": "html_class",
+      "locked_class": "paid-chapter-row",
+      "marker_selector": "svg.lucide-lock"
+    }
   },
   "https://www.mgeko.cc/jumbo/manga/": {
     "mode": "html_li_block",
+    "display_name": "mgeko",
     "item_selector": "li.novel-item",
     "identity_selector": "a.list-body",
     "identity_attr": "href",
@@ -48,7 +88,8 @@
     "novel_link_patterns": [
       "^/manga/(?P<slug>[^/]+)(?:/.*)?$",
       "^/reader/[a-z]{2}/(?P<slug>[a-z0-9-]+?)-chapter-\\d+(?:-\\d+)?-eng-li/?$"
-    ]
+    ],
+    "title_selector": "h4.novel-title"
   },
   "https://api.mangadex.org/chapter?includes[]=manga&order[publishAt]=desc&limit=32&offset=0": {
     "mode": "json",

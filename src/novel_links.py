@@ -15,6 +15,13 @@ Everything site-specific lives in site_parse_rules.json, never here:
 Pure functions: no network, no database. A pasted link is never fetched.
 
 Failure reasons: empty, too_long, not_a_link, unsupported_site, not_a_novel_link, bad_slug
+
+Slug validation is two-tier: SLUG_RE (plain words joined by hyphens) is tried first; if it fails,
+RELAXED_SLUG_RE is tried, which additionally allows the characters real sites put in slugs
+(apostrophe, exclamation mark, colon). Both live here, side by side.
+
+This module also holds the small pure text helpers shared by the scraper and the bot
+(clean_title, prettify_slug, title_for), so neither has to import the other.
 """
 
 import re
@@ -23,6 +30,46 @@ from urllib.parse import unquote, urlparse
 MAX_LINK_LEN = 300
 MAX_SLUG_LEN = 150
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# Fallback tier: must start with a letter or digit, then letters, digits, - ' ! :
+# (the only extra characters seen on real hivetoons / vortexscans slugs). Deliberately NOT allowed:
+# underscore, whitespace, / \ ? # % & < > " and backtick.
+RELAXED_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9'!:\-]*$")
+MAX_TITLE_LEN = 200
+
+
+def slug_tier(slug):
+    """Which rule a slug satisfies: "strict", "relaxed" or None (invalid). Length is checked too."""
+    if not slug or len(slug) > MAX_SLUG_LEN:
+        return None
+    if SLUG_RE.match(slug):
+        return "strict"
+    if RELAXED_SLUG_RE.match(slug):
+        return "relaxed"
+    return None
+
+
+def clean_title(raw):
+    """Collapse whitespace, strip, cap the length. Empty or None becomes None."""
+    if raw is None:
+        return None
+    text = " ".join(str(raw).split())
+    if not text:
+        return None
+    return text[:MAX_TITLE_LEN]
+
+
+def prettify_slug(slug):
+    """Display-time guess at a title from a slug: 'the-hero-s-ballad' -> "The Hero's Ballad".
+    Never written to the database (see title_for)."""
+    text = re.sub(r"[-_]+", " ", slug or "").strip()
+    text = re.sub(r"\b(\w+)\s+s\b", r"\1's", text, flags=re.IGNORECASE)
+    return " ".join(w.capitalize() for w in text.split())
+
+
+def title_for(row):
+    """The title to display for a novel row: its scraped display_title, else a guess from the slug."""
+    row = row or {}
+    return clean_title(row.get("display_title")) or prettify_slug(row.get("novel_name")) or "Unknown title"
 
 
 def normalize_host(host):
@@ -89,7 +136,7 @@ def parse_novel_link(text, rules):
     if hash_regex:
         slug = re.sub(hash_regex, "", slug)
 
-    if not slug or len(slug) > MAX_SLUG_LEN or not SLUG_RE.match(slug):
+    if slug_tier(slug) is None:
         return {"ok": False, "reason": "bad_slug"}
 
     return {"ok": True, "site_key": site_key, "slug": slug}

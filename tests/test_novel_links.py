@@ -168,3 +168,99 @@ def test_the_link_parser_strips_the_hash_exactly_like_the_scraper_does():
     scraper_slug = re.sub(RULES[ASURA]["slug_hash_strip_regex"], "", "nano-machine-ab39de10")
     link_slug = novel_links.parse_novel_link("https://asurascans.com/comics/nano-machine-ab39de10", RULES)["slug"]
     assert scraper_slug == link_slug == "nano-machine"
+
+
+# ---------------------------------------------------------------------------------------------
+# Two-tier slug validation (strict first, relaxed fallback) and the shared title helpers.
+# ---------------------------------------------------------------------------------------------
+
+# Real slugs seen on hivetoons / vortexscans captures that the strict rule alone used to reject.
+RELAXED_REAL_SLUGS = [
+    "the-hero's-ballad",
+    "the-archmage's-restaurant",
+    "never-mind-the-heir-i'll-focus-on-healing",
+    "sovereign-of-a-hundred-blades:-heir-to-the-strongest-style",
+    "from-child-actor-to-world-star!",
+]
+
+
+@pytest.mark.parametrize("slug", RELAXED_REAL_SLUGS)
+def test_real_relaxed_slugs_are_accepted_via_the_fallback_tier(slug):
+    assert novel_links.SLUG_RE.match(slug) is None          # the strict rule really does reject it
+    assert novel_links.slug_tier(slug) == "relaxed"
+    link = "https://hivetoons.org/series/" + slug
+    assert novel_links.parse_novel_link(link, RULES) == ok(HIVE, slug)
+
+
+def test_plain_slugs_still_use_the_strict_tier():
+    assert novel_links.slug_tier("nano-machine") == "strict"
+    assert novel_links.slug_tier("solo-leveling-2") == "strict"
+
+
+def test_percent_encoded_colon_slug_ends_up_the_same_as_the_raw_one():
+    raw = novel_links.parse_novel_link("https://vortexscans.org/series/sovereign-of-a-hundred-blades:-heir", RULES)
+    encoded = novel_links.parse_novel_link("https://vortexscans.org/series/sovereign-of-a-hundred-blades%3A-heir", RULES)
+    assert raw == encoded == ok(VORTEX, "sovereign-of-a-hundred-blades:-heir")
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "", "-bad-", "-leading", "bad_slug", "has space", "a/b", "a\\b", "a?b", "a#b", "a%b", "a&b",
+        "a<b", "a>b", 'a"b', "a`b", "'leading-apostrophe", "!leading", ":leading",
+        "a" * (novel_links.MAX_SLUG_LEN + 1),
+    ],
+)
+def test_slugs_outside_both_tiers_are_rejected(slug):
+    assert novel_links.slug_tier(slug) is None
+
+
+def test_relaxed_slug_at_the_length_limit_is_accepted_and_one_over_is_not():
+    assert novel_links.slug_tier("a" * novel_links.MAX_SLUG_LEN) == "strict"
+    assert novel_links.slug_tier("a'" * (novel_links.MAX_SLUG_LEN // 2)) == "relaxed"
+    assert novel_links.slug_tier("a'" * (novel_links.MAX_SLUG_LEN // 2) + "bc") is None
+
+
+def test_html_sensitive_characters_in_a_pasted_link_are_still_bad_slugs():
+    for evil in ("a<script>", 'a"onmouseover=', "a&amp;b"):
+        assert novel_links.parse_novel_link("https://hivetoons.org/series/" + evil, RULES) == fail("bad_slug")
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, None),
+        ("", None),
+        ("   \n\t ", None),
+        ("  Killer   Pietro \n", "Killer Pietro"),
+        ("Line one\nline two", "Line one line two"),
+        ("x" * 500, "x" * novel_links.MAX_TITLE_LEN),
+        (12345, "12345"),
+    ],
+)
+def test_clean_title(raw, expected):
+    assert novel_links.clean_title(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "slug, expected",
+    [
+        ("killer-pietro", "Killer Pietro"),
+        ("nano-machine", "Nano Machine"),
+        ("the-hero-s-ballad", "The Hero's Ballad"),
+        ("solo_leveling", "Solo Leveling"),
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_prettify_slug_common_cases(slug, expected):
+    assert novel_links.prettify_slug(slug) == expected
+
+
+def test_title_for_prefers_the_scraped_title_then_the_slug_then_a_placeholder():
+    assert novel_links.title_for({"display_title": " Real  Title ", "novel_name": "real-title-x"}) == "Real Title"
+    assert novel_links.title_for({"display_title": None, "novel_name": "killer-pietro"}) == "Killer Pietro"
+    assert novel_links.title_for({"display_title": "   ", "novel_name": "killer-pietro"}) == "Killer Pietro"
+    assert novel_links.title_for({"novel_name": None}) == "Unknown title"
+    assert novel_links.title_for({}) == "Unknown title"
+    assert novel_links.title_for(None) == "Unknown title"
