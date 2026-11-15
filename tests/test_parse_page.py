@@ -7,7 +7,7 @@ runner (Azure IP). Their structure is intact, so the real selectors are what get
 import copy
 import html as html_lib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urljoin
 

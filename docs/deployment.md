@@ -20,10 +20,11 @@ CI (`tests.yml`) runs the test suite on every push, independent of both. A small
 
 Why this shape: GitHub's `schedule` trigger is best effort. Runs start late under load, slots get dropped, gaps of an hour or more happen, and in a public repository it is switched off after 60 days without repository activity, silently. A workflow started through the API is a different event type and is not subject to that schedule queue; in practice it starts within seconds. It is not guaranteed (the job still waits for a runner), so GitHub's own schedule stays as a safety net. The run list says which trigger started each run: `scraper (workflow_dispatch)` or `scraper (schedule)`.
 
-Running twice an hour is safe: every run compares against the database and only notifies on a change, so a second run right after the first finds nothing new and never double-sends. A `concurrency` group (`scraper`, never cancelled) makes a slow run delay the next one instead of overlapping it.
+Running twice an hour is safe: every run compares against the database and only notifies on a change, so a second run right after the first finds nothing new and never double-sends. A `concurrency` group (`scraper`, `cancel-in-progress: false`) makes a slow run delay the next one instead of overlapping it. Note that GitHub keeps at most **one** waiting run per group: if a third arrives while one runs and one waits, the older waiting run is cancelled. That is fine here, because every run is idempotent (the queue's unique key and the claim function stop double sends), and the workflow's `timeout-minutes` stays below the database's 30-minute stale-row recovery.
 
-- **Secrets** (repository secrets): `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`. `database.py` insists on `SUPABASE_PUBLISHABLE_KEY` at import, which the scraper never uses, so the workflow sets a dummy value inline.
-- **Failure visibility:** `main.py` exits non-zero when a run fails, so the run goes red and GitHub emails the owner.
+- **Secrets** (repository secrets): `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, and `ADMIN_TELEGRAM_USER_IDS` (comma-separated Telegram ids that receive site-failure alerts and the daily digest; if the secret is missing or empty both are simply skipped). `database.py` insists on `SUPABASE_PUBLISHABLE_KEY` at import, which the scraper never uses, so the workflow sets a dummy value inline.
+- **Failure visibility:** `main.py` exits non-zero when a run fails (a missing or rejected Telegram token, an unexpected error while sending, or a failed log insert), so the run goes red and GitHub emails the owner. Smaller problems (one site down, some users unreachable) do not turn a run red; they show up in the per-site health row, the admin alert after three failed runs, and the daily digest.
+- **Logs are public** (the repository is), so a run prints counts only: sites ok/degraded/failed/skipped, queue numbers, and the delivery summary. Never ids, titles or message text.
 - **Cadence:** hourly matches what the IP-viability test was built around and is polite to the sites. It can be tightened later by changing the cron-job.org schedule only.
 
 ### Setting up the external trigger
@@ -74,5 +75,12 @@ It listens on `HEALTH_PORT`, or on `PORT`, which Render sets (10000 by default);
 - If Render ever becomes unsuitable, the bot is one ordinary Python process that needs outbound internet and four environment variables; any always-on host that can run `python -m src.bot` works the same way. (A Hugging Face Space was considered first and dropped when the free tier stopped covering Docker Spaces.)
 - Switching the bot from polling to webhooks, so a Telegram message wakes a sleeping service and no timer is needed, is possible but changes tested code and was not chosen for V1.
 
+## Rolling out the V1 burn-in (order matters)
+1. **Database first.** Run `docs/migrations/001_v1_burnin.sql` in the Supabase SQL editor (safe to run twice), then the checks in `docs/migrations/001_v1_burnin_tests.sql` block by block; every row must say `ok = true` and the cleanup block must end with `0 / 0 / 0`. The migration only **adds** things, so the code that is live today keeps working against the new schema.
+2. **Add the repository secret** `ADMIN_TELEGRAM_USER_IDS` (and put it in your local `.env`).
+3. **Preview, then run it locally before merging** (the step-by-step runbook, with the expected output of every step, is [[burnin]]). `python -m scripts.preview_run` shows what a run would do without writing or sending anything. Then, with your real `.env`, `python main.py` does exactly what a scheduled run does, against your real database and Telegram. Nothing needs to be pushed for that. On the first run expect: titles are filled in for every tracked novel, site health rows appear, and anything newer than the database's chapters is queued and delivered once. Run it a second time straight away: it must find nothing new and send nothing. Optionally run the two manual smoke tests (`docs/pytest.md`).
+4. **Merge to `main`.** This starts two things at once: the bot redeploys on Render when CI passes, and the next scheduled scraper run uses the new code. Watch the first few runs in the Actions tab and the admin digest.
+5. **Rolling back.** Revert the merge; the old code works with the new schema. Be aware that rows already in `pending_notifications` are then no longer delivered or recovered (the old code does not know the queue); they expire on their own through the retention job, and the novels they refer to were already advanced, so those few alerts would be lost. This is another reason to do the local run first.
+
 ## Related notes
-[[bot]] · [[main]] · [[pytest]] · [[schema]]
+[[bot]] · [[main]] · [[admin]] · [[pytest]] · [[schema]]

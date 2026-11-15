@@ -1,6 +1,6 @@
 # Database schema (Supabase / PostgreSQL)
 
-The Supabase project is the source of truth; this note is the SQL and the reasoning behind it, as applied in Nov 2026. Code that uses it: [[database]].
+The Supabase project is the source of truth; this note is the SQL and the reasoning behind it, as applied in Nov 2026. Code that uses it: [[database]]. The V1 burn-in additions (queue, tiers, titles, health, SQL functions) are in the last section, and their exact SQL is in [`migrations/001_v1_burnin.sql`](migrations/001_v1_burnin.sql).
 
 ## Tables
 ```sql
@@ -62,7 +62,7 @@ create table scraper_logs (
 - **`novels (web_id, novel_name)` is unique.** The same slug can exist on two sites, but not twice on one: `fetch_novels` keys by slug per site, and a duplicate would silently shadow the other.
 - **`latest_chap` is `not null default -1`.** `-1` means "not scraped yet" (the bot creates novels before the scraper has seen them). It is below every real chapter including 0, so the compare code needs no null handling. The bot must **omit** the column on insert: sending `None` writes a real null (and now fails the `not null`). Anything that displays chapters must treat `-1` as "waiting for first update".
 - **`websites.web_domain_name` is unique** because the bot can recreate a website row on demand (the weekly job deletes websites with no novels). The value is exactly the key used in `site_parse_rules.json`.
-- **`users.status`** (`active` / `paused`) backs `/stop`: `fetch_subscribers` only returns active users.
+- **`users.status`** (`active` / `paused`) backs `/stop`: the recipient read and the queue's claim function only consider active users. A user who blocks the bot is paused automatically.
 - **`novels.latest_chap`** was an `int` and became `numeric(7,2)` for half-chapters (`66.5`) and mgeko's `26.3` style sub-chapters.
 
 ## Row Level Security
@@ -91,5 +91,43 @@ Interactions worth knowing:
 - The bot sets `updated_at = now()` when it creates a novel. A null `updated_at` never matches the `< now() - interval` comparisons, so without it a typo'd slug would live forever; with it, dead slugs expire after 97 days.
 - A website with no novels is deleted on Sundays, so [[database]].`get_or_create_website` recreates the row when the next user adds a novel.
 
+## V1 burn-in additions
+Applied with [`migrations/001_v1_burnin.sql`](migrations/001_v1_burnin.sql); it is safe to run twice. Its checks are in [`migrations/001_v1_burnin_tests.sql`](migrations/001_v1_burnin_tests.sql) (run block by block in the SQL editor: 55 checks, including a two-tab test that two workers never claim the same row). Both ran green against the real project before the first live run.
+
+### Enums and columns on existing tables
+- Enums: `access_state` (`free`, `locked`, `unknown`), `alert_timing` (`early`, `when_free`), `site_tier` (`standard`, `member`), `delivery_status` (`pending`, `sending`, `sent`, `dead`, `cancelled`).
+- `novels.display_title text` (nullable): the scraped title. A title sync never touches `updated_at`, so a title can never keep a dead novel alive past the 97-day cleanup.
+- `user_subscriptions.alert_timing alert_timing` (nullable): `null` means "follow my site tier"; set per novel from the bot.
+
+### New tables (all have RLS enabled and **no** policies, and all access is revoked from `anon` and `authenticated`)
+- **`user_site_tiers`** `(user_id, web_id, tier)`, unique on `(user_id, web_id)`: whether the user is a standard reader or a member on a site with early access. Members default to being told early, standard readers when a chapter becomes free.
+- **`pending_notifications`**, the delivery queue: `user_id`, `novel_id`, `chapter`, `chapter_url`, `access_state`, `unlock_at`, `due_at`, `status`, `attempts`, `last_attempt_at`, `error_detail`, `created_at`, `sent_at`. **Unique on `(user_id, novel_id, chapter)`**, which makes re-queueing a chapter a no-op and is what lets a crash between "queue" and "advance the novel" cost nothing. Indexes cover the due scan and the stale-`sending` scan.
+- **`site_health`** `(web_id` primary key`, last_status, consecutive_failures, failure_alerted, failing_since, last_failed_at, last_resolved_at, last_ok_at, last_error)`.
+- **`app_state`** `(key, value, updated_at)`: tiny key/value store; today only `last_digest_sent_at`.
+
+### SQL functions
+All are `SECURITY DEFINER` with a fixed `search_path`, and executable **only by `service_role`** (revoked from `PUBLIC`, `anon` and `authenticated`; the test script checks this against the real project).
+
+| Function | What it does |
+|---|---|
+| `update_novels_batch(items jsonb)` | one call updates `latest_chap`, `chapter_url` and `updated_at` for many novels, and `display_title` only when a non-blank one is sent; returns the ids it updated |
+| `sync_novel_titles(items jsonb)` | sets titles where they differ; never touches `updated_at`; blank titles never erase one |
+| `claim_due_notifications(batch_limit int)` | atomically takes `pending` rows that are due (`due_at <= now`) for **active** users whose subscription is still `reading`, using `FOR UPDATE SKIP LOCKED`; marks them `sending`, counts the attempt, and returns them joined with the Telegram id, novel name and title, and site. Two workers can never receive the same row |
+| `mark_notifications_sent(notification_ids uuid[])` | `sending` → `sent`; returns how many changed (0 when repeated) |
+| `mark_notifications_dead(notification_ids, err_text)` | `sending` → `dead` with a reason |
+| `release_failed_notifications(notification_ids, err_text)` | `sending` → `pending`, or `dead` after 5 attempts or once the row is 24 hours overdue |
+| `maintain_notification_queue()` | returns `recovered` (rows stuck `sending` for over 30 minutes go back to `pending`), `cancelled` (`pending` rows whose subscription no longer exists or is not `reading`; paused users are **kept**, not cancelled) and `expired` (`pending` rows more than 24 hours overdue → `dead`) |
+| `record_site_result(p_web_id, p_status, p_error)` | upserts the site's health row: failures extend the streak (and set `failing_since` once), `ok` or `degraded` end it and stamp `last_resolved_at`; an unknown status raises. Returns `o_consecutive_failures`, `o_failure_alerted` |
+| `queue_stats_24h()` | one row of last-24-hour numbers for the digest |
+| `cleanup_notification_logs()` | retention: `sent` rows older than 30 days and `dead` / `cancelled` rows older than 60 days are deleted |
+
+### Cron job
+`cleanup-notification-logs`, daily at 00:10 UTC, runs `cleanup_notification_logs()`.
+
+### Interactions worth knowing
+- Everything below cascades: deleting a **user** removes their tier rows and queue rows; deleting a **novel** (the 97-day and no-subscriber jobs) removes its queue rows; deleting a **website** (the Sunday job, when it has no novels) removes its `site_health` row and every user's saved tier for it. The last one means a user who saved an account type and then stopped following everything on that site is simply asked again next time. Keeping websites that still have tier rows would be a small change to that Sunday statement.
+- The queue holds at most a few rows per user and chapter, and finished rows are deleted by retention, so it stays far below the free tier's 500 MB.
+- Timestamps are `timestamptz`; the Python side compares them in UTC and shows people IST only in admin messages.
+
 ## Related notes
-[[database]] · [[bot]] · [[main]]
+[[database]] · [[bot]] · [[main]] · [[scheduling]]

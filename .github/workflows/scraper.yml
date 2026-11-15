@@ -23,8 +23,10 @@ on:
 permissions:
   contents: read
 
-# One run at a time. If a run is slow, the next one waits instead of overlapping
-# (overlapping runs could send the same notification twice). A waiting run is never cancelled.
+# One run at a time. If a run is slow, the next one waits instead of overlapping. GitHub keeps at most
+# ONE waiting run per group: if a third arrives, the older waiting one is cancelled. That is fine, because
+# every run is idempotent (the queue's unique key and the claim function stop double sends). Keep
+# timeout-minutes below the 30-minute stale-row recovery in the database.
 concurrency:
   group: scraper
   cancel-in-progress: false
@@ -52,5 +54,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # comma-separated Telegram ids that receive failure alerts and the daily digest
+          ADMIN_TELEGRAM_USER_IDS: ${{ secrets.ADMIN_TELEGRAM_USER_IDS }}
           # database.py insists on all three variables at import; the scraper never uses this one
           SUPABASE_PUBLISHABLE_KEY: "unused-by-the-scraper"

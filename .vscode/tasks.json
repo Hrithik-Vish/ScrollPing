@@ -1,3 +1,4 @@
+
 {
   "version": "2.0.0",
   "tasks": [
@@ -7,6 +8,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -15,7 +17,12 @@
         "import runpy, sys; from pathlib import Path; runpy.run_path(str(Path('/app') / sys.argv[1].replace(chr(92), '/')), run_name='__main__')",
         "${relativeFile}"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Run Pytest",
@@ -23,6 +30,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -30,7 +38,12 @@
         "-m",
         "pytest"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Pytest Verbose",
@@ -38,6 +51,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -46,7 +60,12 @@
         "pytest",
         "-v"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Pytest Stop At First Failure",
@@ -54,6 +73,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -63,7 +83,12 @@
         "-x",
         "-v"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Pytest Last Failed",
@@ -71,6 +96,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -80,7 +106,12 @@
         "--lf",
         "-v"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Pytest Current File",
@@ -88,6 +119,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -96,7 +128,12 @@
         "import sys, pytest; sys.exit(pytest.main([sys.argv[1].replace(chr(92), '/'), '-v']))",
         "${relativeFile}"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     },
     {
       "label": "Docker: Pytest By Keyword",
@@ -104,6 +141,7 @@
       "command": "docker",
       "args": [
         "exec",
+        "-it",
         "-w",
         "/app",
         "scrollping-dev",
@@ -114,7 +152,12 @@
         "-k",
         "${input:pytestKeyword}"
       ],
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
     }
   ],
   "inputs": [

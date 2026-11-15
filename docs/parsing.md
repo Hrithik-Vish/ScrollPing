@@ -1,79 +1,88 @@
 # parsing.py
 
 ## Purpose
-Extracts candidate chapter-link URLs from raw HTML, using a keyword+number regex on anchor `href` attributes. Deliberately scoped to "find and return candidate links" only — per-site slug/chapter-number extraction and format differences are `compilation_fnct`'s job, not this file's.
+Turns a site's raw HTML into **what the pipeline needs to know**: which chapters are on the page, which novel each belongs to, what the novel is called, and whether the chapter is locked (and until when). Everything here is pure: HTML text and a rules dict in, plain data out. No network, no database, no clock.
 
-## Function: `parse_html(file)` (mode `html`)
+The entry point is `parse_page(html, rules)`. The older `parse_html` and `parse_html_li_block` are kept (and tested) but `main.py` no longer calls them; `parse_page` replaces both.
 
-**Input:** raw HTML string (from `fetch_html`)
-**Returns:** list of href strings (candidate chapter links); `[]` if none found
-
-### Flow
-1. Parses `file` with BeautifulSoup using the `lxml` parser.
-2. Finds all `<a>` tags whose `href` matches the chapter regex.
-3. Extracts `href` via `.get("href")` for each match, appending only truthy values to the result list.
-
-### The regex
+## `parse_page(html, rules)` → `{"items", "titles", "diagnostics"}`
 ```
-r"[/-]?(chapters?|chs?|episodes?|eps?|comics?|titles?|series|mangas?)[/-]?(\d+(\.\d+)?)"
+items        [{"href", "chapter_text", "locked", "title", "slug", "chapter", "unlock_at"}, ...]
+titles       {slug: title}
+diagnostics  {"items": n, "titles": n, "lock": "ok" | "missing" | "n/a", ...counts only}
 ```
-- Matches a keyword (chapter/ch/episode/ep/comic/title/series/manga, singular or plural) followed by a number, loosely anchored anywhere in the URL string, optionally separated by `/` or `-`.
-- Supports half-chapters (e.g. `66.5`) via the optional decimal group.
-- This is intentionally loose — it's a first-pass candidate filter, not a final extractor. Precision (rejecting non-chapter matches, pulling out the actual number) is deferred to `compilation_fnct`.
+- `slug` is normalised exactly like a pasted link is in [[novel_links]]: percent-decoded, lower-cased, and with the site's hash suffix stripped (`slug_hash_strip_regex`). If the scraper and the bot ever disagreed on a slug, a followed novel would silently never match; a test pins that they agree for every item of every fixture.
+- `chapter` is a float (`12.5`), or `None` when a chapter text has no number.
+- `locked` is `True` / `False`, or **`None` when the site's lock data could not be read** (asura without its page island). Sites without locks report `False`.
+- `unlock_at` is an ISO 8601 UTC string or `None`.
+- Which of three strategies runs depends on the site's rules:
 
-## Known gap (confirmed via real data)
-- On asurascans.com, the regex incorrectly matches non-chapter promotional links like `/comics/30-years-since-the-prologue-05c7df14` — it matches "comics" + trailing digits from the hash suffix, not an actual chapter number.
-- **Decision:** don't fix the regex for this. It's rare (only a few per page, only on asurascans) and cheaply filtered downstream in `[[main|compilation_fnct]]` via path-segment count (these promo links have only 2 path segments vs. 3–4 for real chapter links).
+| Rules contain | Strategy | Sites |
+|---|---|---|
+| `lock_detection` | read the page's `<astro-island>` data (below) | asurascans |
+| `mode: html_li_block` | selector-based blocks | mgeko |
+| otherwise | chapter links (`<a href>`), optional `lock_badge`, titles via `title_selector` | hivetoons, vortexscans, kunmanga |
 
-## Per-site parsing status (V1 target sites)
+### Link-based sites (hive, vortex, kunmanga)
+- An `<a href>` is a chapter item when its path has `segment_count` segments and `chapter_regex` matches its last two segments. Links to other hosts are ignored; same-site absolute links count.
+- **Fragments are dropped** before anything else. Hive and vortex also link `/series/x/chapter-425#comment-18624` (to the chapter's comments); without this, a comment link could become the chapter URL a user is sent to. After dropping the fragment it merges with the plain link.
+- Duplicate links (a chapter shown in several page sections) are merged into one item; if any copy carries the lock class, the chapter counts as locked.
+- **Titles** come from every element matching `title_selector` (its own `href` gives the slug via `novel_link_patterns`; its text, or the attribute named by `title_attr`, is the title; the first title seen for a slug wins). Hive and vortex use `a.line-clamp-2` with `title_attr: title`. Kunmanga renders titles in three different layouts; the real capture showed `.post-title h4 a` alone found only 16 of 45 novels, so the rule is the union `.post-title a, h5.widget-title a`. A series that has no title anchor on the page simply has no title (the bot and messenger fall back to a guess from the slug).
+- **Lock badge** (`lock_badge`): a chapter is locked when its `<a>` has the class `locked_class` (`paid-chapter-row`). Careful: on the real pages almost every chapter row also has the class `newly-free-chapter-row`, so the match is an exact class-list check, never a substring like "free". Lock *state* only: these sites give no unlock time.
+- `diagnostics.lock` is `missing` when the lock icon (`marker_selector`, `svg.lucide-lock`) is on the page but no element has the lock class (the site renamed it); otherwise `ok`. A quiet moment with no locked chapters is normal and not flagged.
 
-**Working** (plain HTML anchors; the keyword+number regex is enough). Verified against real captured links in `tests/fixtures/real_links.json`:
-- asurascans.com
-- hivetoons.org
-- kunmanga.online
-- vortexscans.org
+### asurascans: the page island
+Asura renders its latest updates from an `<astro-island>` element whose `props` attribute is JSON in Astro's wrapped format (`[0, value]`, `[1, [wrapped...]]`). `unwrap_astro` unwraps it; `parse_astro_island(html, rules)` finds the list named by `lock_detection.list_key` (`chapters`), preferring the island whose `component-url` contains `lock_detection.component` (`LatestUpdates`) but not depending on it.
+- Each entry has the comic's public URL, slug, name, chapter number, `is_premium`, `published_at` and `early_access_until`. `locked = is_premium`; `unlock_at` is `early_access_until` converted to UTC. (Free chapters also carry an `early_access_until`, in the past; it is parsed but means nothing there.) In every sample the unlock time was exactly `published_at` plus 6 hours; if a locked entry has no usable unlock time, `published_at + fallback_window_hours` (6) is used.
+- The chapter URL is built from the entry (`<public_url>/chapter/<n>`, written the way the site writes it: `156` not `156.0`, `12.5` as is). A test (spec check A) asserts that every URL built this way equals the URL of the matching `<a>` in the same page.
+- The island holds more chapters than the page renders as links (300 against 60 in the capture), and is grouped by comic rather than sorted by time. That is fine: only the highest chapter per slug matters, and the island is the more complete source.
+- If more than half of the entries are unusable, or no island is found, the island counts as missing: items fall back to the plain links with `locked = None`, titles are empty, and `diagnostics.lock` is `missing` (the site is `degraded`; alerts still flow).
 
-**Working through its own mode:**
-- mgeko.cc (`mode: html_li_block`): see `parse_html_li_block` below.
+### mgeko (`html_li_block`)
+Per `li.novel-item` block: slug from the novel link (`a.list-body`), chapter text from `h5.chapter-title` (`Chapter 26-3-eng-li` → `26-3` → `26.3`), title from `h4.novel-title` (`title_selector`). Blocks without a chapter row (other sections of the page) contribute titles but no items. Edge case accepted for V1: `26-10` becomes `26.1`.
 
-**Not implemented yet** (the output isn't HTML anchors at all). [[main|process_website]] skips it before fetching because its `mode` isn't in `SUPPORTED_MODES`:
-- api.mangadex.org (`mode: json`) — deferred until V1 is finalized (the site now serves a browser-verification page)
+## `classify_site(diagnostics, fetched_ok, exception)` → `"ok" | "degraded" | "failed"`
+`failed`: an exception, a failed fetch, no diagnostics, or zero items. `degraded`: items found but zero titles, or `lock == "missing"`. Otherwise `ok`. (`skipped` is decided by the caller before any fetch and never recorded in site health.)
+
+## `validate_rules(rules)` → list of problem strings (empty = fine)
+Checked at the start of every run (problems are printed, not fatal) and by a test against the real file: mode known; `display_name`; `base_url` an http(s) URL; every regex compiles and `chapter_regex` has a capture group; `novel_link_patterns` have a named group `slug`; every CSS selector compiles (with `soupsieve`); a title source exists (`title_selector`, `title_field` or `lock_detection.fields.title`); `lock_detection` and `lock_badge` are not both set; `lock_detection` needs `type`, `list_key`, the `chapter` and `is_locked` fields, a public URL or slug field, and `tier_labels` for `standard` and `member`; `lock_badge` needs `locked_class` and `marker_selector`; li-block sites need their selectors and a template with `{slug}` and `{chapter}`. MangaDex (`json`) is accepted as a placeholder.
 
 ## `site_parse_rules.json` — field reference
-One entry per site, keyed by the **exact** `websites.web_domain_name` string (copy-pasted from the browser, never hand-typed). The root file is the source of truth; `docs/site_parse_rules.json` is a copy for the notes.
+One entry per site, keyed by the **exact** `websites.web_domain_name` string (copy-pasted from the browser, never hand-typed). The root file is the source of truth; `docs/site_parse_rules.json` is a copy for the notes (a test checks they are identical). The order of the entries is the order sites are listed to users.
 
 | Field | Used by | Meaning |
 |---|---|---|
 | `mode` | `process_website` | `html` and `html_li_block` today; `json` planned |
-| `segment_count` | `compilation_fnct` | number of path segments in a real chapter link (4 for asura, 3 for the others); promo/nav links with a different count are skipped |
-| `chapter_regex` | `compilation_fnct` | applied to the last two segments; group 1 is the chapter number |
-| `slug_hash_strip_regex` | `compilation_fnct` | asurascans only: removes the `-ab39de10` suffix from the slug, both for matching and in the stored URL (the site accepts hashless URLs) |
-| `base_url` | `compilation_fnct` | scheme + host only (no path, no trailing slash); joined with the path via `urljoin` to build the absolute `chapter_url`. MangaDex has none yet |
-| `item_selector`, `identity_selector`, `identity_attr`, `chapter_text_selector` | `parse_html_li_block` | mgeko: which blocks to read, where the novel link is, where the chapter text is |
-| `chapter_url_template` | `compilation_fnct_li_block` | mgeko: path template for the reader URL, joined to `base_url`; placeholders `{slug}` and `{chapter}` (the raw token, e.g. `26-3`) |
-| `novel_link_patterns` | [[novel_links]] | regexes with a named group `slug`, matched against the path of a link a user pastes into the bot; a site is addable only if it has these and a `base_url` |
+| `display_name` | messenger, bot, digest | the site's name shown to people |
+| `segment_count` | `parse_page` | number of path segments in a real chapter link (4 for asura, 3 for the others) |
+| `chapter_regex` | `parse_page`, compile | applied to the last two segments (or the li-block chapter text); group 1 is the chapter number |
+| `slug_hash_strip_regex` | `parse_page`, [[novel_links]] | asurascans only: removes the `-ab39de10` suffix from slugs |
+| `base_url` | compile, [[novel_links]] | scheme + host only; joined with a link to build the absolute `chapter_url` |
+| `title_selector`, `title_attr` | `parse_page` | where the title is; `title_attr` reads an attribute instead of the text |
+| `title_field`, `lock_detection` | `parse_astro_island` | asura: the island's component, list key and field names (`public_url`, `slug`, `chapter`, `title`, `is_locked`, `published_at`, `unlock_at`), `fallback_window_hours` |
+| `lock_badge` | `parse_page` | hive and vortex: `locked_class` and `marker_selector` |
+| `tier_labels` | bot | the words for the two account types, e.g. `Free reader` / `Asura+ member` (only on sites with `lock_detection`) |
+| `item_selector`, `identity_selector`, `identity_attr`, `chapter_text_selector` | li-block parsing | mgeko: which blocks to read, where the novel link is, where the chapter text is |
+| `chapter_url_template` | `compilation_fnct_li_block` | mgeko: path template for the reader URL; placeholders `{slug}` and `{chapter}` |
+| `novel_link_patterns` | [[novel_links]], `parse_page` | regexes with a named group `slug`, matched against the path of a link (a pasted one, or a series card's own link) |
 | `language_filter` | planned `json` | MangaDex: English only for now |
 
-## `parse_html_li_block(file, rules)` (mode `html_li_block`, mgeko)
-**Input:** raw HTML and the site's rule dict. **Returns:** a list of `{"identity": <href>, "chapter_text": <text>}` dicts, in page order; `[]` when nothing matches.
+## The old functions (still present)
+- **`parse_html(file)`** returns the hrefs matching a loose keyword-plus-number regex. Known quirk: on asurascans it also matches promo links like `/comics/30-years-since-the-prologue-05c7df14`; those never become items because their segment count is wrong.
+- **`parse_html_li_block(file, rules)`** returns `{"identity", "chapter_text"}` pairs for mgeko blocks.
 
-For each element matching `rules["item_selector"]` (`li.novel-item`) it reads the href from `identity_selector` (`a.list-body`, attribute `identity_attr`) and the text from `chapter_text_selector` (`h5.chapter-title`). Blocks missing either part, or with blank text, are dropped. Every selector comes from the rules, none is hard-coded. [[main|compilation_fnct_li_block]] turns the pairs into update rows.
-
-What the site gives us (real markup):
-- each entry is `<li class="novel-item">` containing `<a class="list-body" href="/manga/the-archmages-restaurant/">` (the **novel** page, relative, leading slash) and `<h5 class="chapter-title">Chapter 157-eng-li</h5>`;
-- sub-chapters look like `Chapter 26-3-eng-li`; the reader URL pattern is `https://www.mgeko.cc/reader/en/<slug>-chapter-<n>-eng-li/` (checked for chapter 1 on two novels, and encoded as `chapter_url_template`).
-
-Consequences:
-- `parse_html` returns `[]` for this markup (the href has no keyword followed by digits), which is why the mode exists.
-- `chapter_regex` is `Chapter\s+(\d+(?:-\d+)?)`, which captures `26-3`; the hyphen becomes a dot (`26-3` → `26.3`) before `float()`. Edge case: `100-10` becomes `100.1` and sorts below `100-3` (`100.3`); accepted for V1.
-- Worth re-checking in a browser from time to time that a current chapter really lives at the templated reader URL; if the site changes it, only `chapter_url_template` needs editing.
-
-## MangaDex (`json`) — notes for later
+## MangaDex (`json`): notes for later
 - Not HTML at all: chapter number is `data[i].attributes.chapter`; manga name from the `relationships` entry of type `manga`, `attributes.title["ja-ro"]` (most lack `en`).
-- The reader URL is built from the chapter **id**, `https://mangadex.org/chapter/<id>` (confirm in a browser) — so there is no parsed path to join; `base_url` will be `https://mangadex.org`.
+- The reader URL is built from the chapter **id**, `https://mangadex.org/chapter/<id>`; `base_url` will be `https://mangadex.org`.
 - The same manga can appear under several `translatedLanguage` values; English only for now. Bracket parameters must be URL-encoded via a dict, and the User-Agent must be descriptive.
 
-## Future work (noted in file as a comment)
-- `#re.compile needs working with edge cases` — flagged for JS-rendering / Cloudflare-related edge cases in the regex, separate from the asurascans promo-link issue above.
-- The hash-suffix workaround assumes sites keep accepting hashless URLs; if asurascans stops, `slug_hash_strip_regex` should only be used for matching.
-- Future: per-site class-based CSS selector parsing for sites that don't include "chapter" keywords in URLs at all.
+## Fixtures
+`tests/fixtures/*_latest.html` are trimmed copies (3 to 12 KB each) of captures taken on a GitHub Actions runner, so the real markup, including the traps above (comment links, `newly-free-chapter-row`, the `%3A` slug on vortex, the three kunmanga layouts), is what the tests run against. `real_links.json` keeps the older captured hrefs.
+
+## Future work
+- Per-site class-based selectors for sites that do not put "chapter" in their URLs at all.
+- Unlock times for hive and vortex, if those sites ever expose them.
+- The hash-suffix workaround assumes sites keep accepting hashless URLs; if asurascans stops, `slug_hash_strip_regex` should only be used for matching (the compile step already uses the page's own link, hash included).
+
+## Related notes
+[[main]] · [[novel_links]] · [[fetching]] · [[scheduling]] · [[pytest]]

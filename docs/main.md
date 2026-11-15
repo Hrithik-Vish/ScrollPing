@@ -1,99 +1,92 @@
 # main.py — ScrollPing Orchestrator
 
-**Status:** The full pipeline works end to end for 5 of 6 sites (asurascans, hivetoons, kunmanga, vortexscans, mgeko): scrape → compare → update DB → notify subscribers → close the log row. mangadex is skipped on purpose until its `json` mode is implemented (see [[parsing]]). Covered by [[pytest]] (`tests/test_main.py`, `tests/test_mgeko.py`, `tests/test_run.py`, `tests/test_site_isolation.py`). Users manage their subscriptions through the separate Telegram command handler, see [[bot]]; `main.py` itself only scrapes and sends.
+**Status:** The full pipeline works end to end for 5 of 6 sites (asurascans, hivetoons, kunmanga, vortexscans, mgeko): scrape → compare → queue → update novels → deliver → admin step → close the log row. mangadex is skipped on purpose until its `json` mode is implemented (see [[parsing]]). Covered by [[pytest]] (`tests/test_main.py`, `test_run.py`, `test_site_isolation.py`, `test_mgeko.py`, `test_admin_step.py`, `test_pipeline_flow.py`). Users manage their subscriptions through the separate Telegram command handler, see [[bot]]; `main.py` itself only scrapes and sends.
 
 ## Purpose
-Runs one full scrape cycle: fetch tracked websites → scrape each for new chapters → compare against the DB → persist updates → find subscribers → send Telegram alerts → mark the run successful.
+Runs one full cycle: gather what changed on every tracked site → decide who must be told, and when → write that to a delivery queue → advance the novels → deliver what is due → tell the admins about problems → mark the run successful.
+
+`main.py` is the **impure shell**. The decisions live in pure modules it calls: [[parsing]] (what is on a page), [[scheduling]] (who is told when, which badge), [[admin]] (alerts and digest). The Telegram side is [[telegramMessenger]]; every database call is in [[database]].
 
 ## `run()` — execution flow
-1. [[database]].`insert_scraper_logs()` → `(status, row_id)`. If `status` is `False`: print a message and `sys.exit(1)` — nothing else runs.
-2. [[database]].`fetch_websites()` → `site_id` and `web_url` lists.
-3. Load [[site_parse_rules.json]] **once** (`site_parse_rules`).
-4. `finding_updated_novels(site_id, web_url, site_parse_rules)` → `updated_novel_list`.
-5. [[database]].`update_novels_table(updated_novel_list)` → list of novel ids whose write failed.
-6. **Drop the failed ids from `updated_novel_list`.** A novel whose DB write failed is not notified now. Its `latest_chap` was never saved, so the next run finds the same chapter again and notifies then. This prevents both stale data and duplicate alerts.
-7. Collect `novel_id_list`, then [[database]].`fetch_subscribers(novel_id_list)` (reading subscriptions of **active** users only; paused users are skipped).
-8. `group_subscribers(subscribers_list, updated_novel_list)` → `user_tele_dict`.
-9. [[telegramMessenger]].`send_all(user_tele_dict)` inside a `try`, then `print_send_summary`.
-10. [[database]].`update_scraper_logs(row_id)` flips the log to `success`.
-11. If a fatal send problem happened, `sys.exit(1)` (after step 10).
+1. **Log gate.** [[database]].`insert_scraper_logs()` → `(status, row_id)`. If `status` is `False`: print a message and `sys.exit(1)`; nothing else runs.
+2. **Queue maintenance.** `maintain_queue()` gives back rows a dead run left in `sending` for over 30 minutes, cancels rows whose subscription is no longer `reading`, and expires rows more than 24 hours overdue. Fail-soft: a failure is printed and the run continues.
+3. **Config.** `fetch_websites()`, load `site_parse_rules.json` **once**, run [[parsing]].`validate_rules` and print each problem (the run still continues; a broken site fails on its own).
+4. **Per-site loop.** `finding_updated_novels(...)` returns one **result object** per site (see `process_website`).
+5. **Site health.** For every site that was not `skipped`, `record_site_result(site_id, status, error)` (fail-soft; failures are only counted).
+6. **Titles.** All sites' `title_updates` go to `sync_novel_titles` in one call. It never touches `updated_at` (decision D4: a title sync must not keep a dead novel alive past the 97-day cleanup).
+7. **Recipients** (only if some chapter changed). `fetch_subscribers_with_preferences(novel_ids, web_id_by_novel)` → recipients (active users, status `reading`, with their per-novel timing), site tiers, and `failed_novel_ids`.
+8. **Queue first (decision D1).** `scheduling.build_queue_records(...)` makes one record per (chapter, recipient) with its own `due_at`, and `insert_queue_records` writes them. Novels whose recipients could not be read, or whose rows failed to insert, are **held back**: they are not advanced, so the chapter is simply detected again next run.
+9. **Novels second.** `update_novels_table(rows not held back)`: one RPC for the whole run. A failed id only means that write did not happen; it never blocks an alert, because the queue already has the rows.
+10. **Deliver.** `dispatch_queue(rules=...)` claims due rows (500 at a time, at most 10 passes), groups them per Telegram user, and hands them to [[telegramMessenger]].`send_all`, which acknowledges every outcome through a `QueueDelivery`. Runs even on a quiet run, because the queue also holds retries and delayed unlocks from earlier runs. `InvalidToken`, a missing token and any unexpected error each print a message and set `notify_failed`.
+11. **Admin step.** `run_admin_tasks(rules, now)`: alerts for sites that failed three or more runs in a row, and the daily digest when due (see below). Wrapped in `try/except`: a problem here never fails an otherwise good run.
+12. **Close the log.** `update_scraper_logs(row_id)` flips the row to `success`. This happens even after a fatal send problem: the scrape and database work did finish.
+13. If `notify_failed`, `sys.exit(1)` (after step 12), so the GitHub Actions run shows red.
 
-### Why sending sits where it does
-- Sending is **after** the DB update so users are never told about data the DB doesn't have yet.
-- The log flip is **after** sending, but a send problem can never stop the flip: the `try/except` records a `notify_failed` flag and the flip runs regardless. The flag only decides the exit code at the very end.
-- `InvalidToken`, a missing token (`RuntimeError`) and any unexpected exception from the messenger each print a message, set `notify_failed`, and end with exit code 1 so the GitHub Actions run shows red. The `InvalidToken` branch prints a fixed message on purpose — the library's own message contains the token.
-- Partial send failures (blocked users, bad requests, exhausted retries) do **not** change the exit code; they are counted in the summary.
-- `scraper_logs.run_status` therefore means "scrape and DB work finished", not "every notification was delivered".
+### Why the order is what it is
+- **Queue before novels.** Previously the novel was updated first and a crash before sending lost the alert for good. Now the alert exists in the database before anything is advanced. A crash between steps 8 and 9 costs nothing: the next run detects the chapter again, and the queue's unique key `(user_id, novel_id, chapter)` makes the re-insert a no-op.
+- **Delivery is last among the data steps,** so users are never told about data the database does not have.
+- **The log flip never depends on delivery.** `scraper_logs.run_status` means "scrape and database work finished", not "every notification was delivered".
+- **Partial send failures do not change the exit code.** Blocked users, refused messages and exhausted retries are counted in the summary; only run-level problems (token) exit 1.
+- **A quiet run does not check the token.** `send_all` is only called when something was claimed, so a rejected token is noticed the next time there is something to send.
 
 ## Functions
 
 **`finding_updated_novels(site_id_list, web_url_list, site_parse_rules)`**
-Loops sites one at a time and flattens the results. Each site runs inside `try/except Exception`: an unexpected error prints the site id, URL and full traceback, then the loop continues. This is the per-site isolation promised in the README. `KeyboardInterrupt` is not swallowed.
+Loops the sites one at a time and returns one result object each. Each site runs inside `try/except Exception`: an unexpected error prints the site id, URL and traceback (to the log only), and that site becomes a `failed` result carrying **only the error class name** (never a message), so the other sites still run. `KeyboardInterrupt` is not swallowed.
 
-**`process_website(site_id, web_url, site_parse_rules)`**
-Per-site pipeline:
-1. Look up `site_parse_rules.get(web_url)`. No rules, or a `mode` not in `SUPPORTED_MODES` → print a skip message and `return []` **before any network call**.
-2. [[fetching]].`fetch_html` through `retry()` (3 attempts).
-3. Parse, by `rules["mode"]`: `html` → [[parsing]].`parse_html` + `compilation_fnct`; `html_li_block` → [[parsing]].`parse_html_li_block` + `compilation_fnct_li_block`.
-4. [[database]].`fetch_novels` through `retry()`.
-5. Build `fetched_novels`: a dict keyed by novel name (the slug) with the other columns as values.
-6. Run the compile function for the mode with `(parsing_data, fetched_novels, site_rules)`.
-7. Print every skipped item (`site_id: web_url: link`) and return the updated rows.
-Fails soft: it returns `[]` at any stage that yields nothing.
+**`process_website(site_id, web_url, site_parse_rules)`** → result object
+`{"site_id", "web_url", "status", "error", "rows", "title_updates", "skipped"}`. Steps:
+1. No rules for the site, or a `mode` not in `SUPPORTED_MODES` → status `skipped`, **before any network call**.
+2. [[fetching]].`fetch_html` through `retry()` (3 attempts); nothing returned → `failed`, error `fetch failed`.
+3. [[parsing]].`parse_page` → items, titles, diagnostics; [[parsing]].`classify_site` turns the diagnostics into `ok` / `degraded` / `failed`. No items on the page → `failed` (a "latest updates" page always has some), and the database is not even asked.
+4. [[database]].`fetch_novels` through `retry()`; a site with no tracked novels is still a healthy scrape.
+5. Compile (below) → rows; `find_title_updates` → title updates; print the untracked links (at most 25 per site, then a count).
+
+Status meanings: `ok`; `degraded` (the page parsed but titles or lock detection are missing: alerts still work, the health row says why); `failed`; `skipped` (never recorded in site health).
+
+**`compilation_fnct(items, fetched_novels, rules)`** (mode `html`) and **`compilation_fnct_li_block(...)`** (mode `html_li_block`, mgeko)
+Pure. Both consume the **items** `parse_page` produced, so link parsing no longer happens here. For every tracked slug they keep the item with the highest chapter (the first one seen wins a tie) and emit a row only if it is newer than the database's `latest_chap`. A row is
+`{"id", "novel_name", "latest_chap", "chapter_url", "display_title", "access_state", "unlock_at", "web_id"}`:
+- `access_state` is `locked` / `free`, or `unknown` when lock parsing failed; `unlock_at` is an ISO time or `None`;
+- `chapter_url` is the page's own link joined to `base_url` (so asura keeps its hash, which is part of the working URL); mgeko builds it from `chapter_url_template` and the raw chapter token (`26-3` stays `26-3` in the URL);
+- `web_id` is not in the original spec's row shape; it is carried so a recipient's tier **on this site** can be looked up when the queue records are built.
+`fetched_novels` is not mutated. Returns `(rows, skipped)`, where `skipped` lists links to novels nobody tracks.
+
+**`find_title_updates(titles, fetched_novels, skip_ids)`**
+Tracked novels whose scraped title differs from the stored one. A novel that already has a chapter row is left out: the batch update writes its title.
+
+**`QueueDelivery`**
+What the messenger calls after each send. It holds no logic: `ack_sent`, `release`, `mark_dead` and `blocked` are one database call each (`blocked` also cancels the user's waiting rows).
+
+**`group_claimed(claimed)`** → `{telegram_user_id: [claimed row, ...]}` in queue order. Pure.
+
+**`dispatch_queue(delivery=None, rules=None)`**
+The claim → send loop described in step 10. Returns the summed counts-only summary. Exceptions from the messenger propagate to `run()`; rows still `sending` are recovered by the next run's maintenance step.
+
+**`run_admin_tasks(rules, now)`** (step 11)
+- No admin ids (`ADMIN_TELEGRAM_USER_IDS` empty) → one printed line, nothing else.
+- Alerts: for every site the database reports as failing 3+ runs and not yet reported, send [[admin]].`build_alert` to every admin. A site is marked reported only if **at least one admin received it**, so an undelivered alert is tried again next run.
+- Digest: read the "last sent" marker; if [[admin]].`digest_due` says it is time, build and send it, and store the marker **only after a successful delivery**. If the marker cannot be read the digest is skipped (a database blip must not cause a duplicate); alerts, which come first, are unaffected.
+
+**`retry(func, max_attempts, *args)`**
+Generic wrapper: calls `func`, and on any exception sleeps 5 seconds and tries again, up to `max_attempts`. Returns `[]` after the last failure. It can only retry something that raises, which is why [[fetching]].`fetch_html` raises on temporary failures.
+
+**`print_send_summary(summary)`** prints counts only: `telegram: sent=… blocked=… bad_request=… failed=… retried=…`. Never chat ids, titles or message text: the repository is public, and so are its Actions logs.
 
 `SUPPORTED_MODES = ("html", "html_li_block")` lives at the top of `main.py`. Adding the `json` mode (MangaDex) later starts with adding it there, plus a parse and compile pair and a branch in `process_website`.
 
-**`compilation_fnct(parsing_data, fetched_novels, rules)`**
-Pure: no globals, no file I/O, no DB or network. Takes only one site's rule dict. For each scraped href it:
-- splits the path and checks the segment count against `rules["segment_count"]`;
-- runs `chapter_regex` on the last two segments and reads the chapter with `group(1)` as a `float` (so `12.5` works);
-- takes the slug from segment 1, stripping a hash suffix when `slug_hash_strip_regex` is set (asurascans), and writes the stripped slug back into the path;
-- skips links whose slug isn't in `fetched_novels`;
-- keeps the highest chapter per novel, building the absolute `chapter_url` with `urljoin(rules["base_url"], path)`.
-After the loop, it hands the comparison to `collect_updated_rows` and returns `(updated_rows, skipped)`. A row is `{"id", "novel_name", "latest_chap", "chapter_url"}`.
-`fetched_novels` is mutated in place; that's fine because it is a throwaway dict per site, and tests build a fresh copy each time.
-
-**`collect_updated_rows(fetched_novels, original_latest)`**
-Shared tail of every compile function. Compares each novel's `latest_chap` with the snapshot taken before the scan and returns the rows that moved forward. Pure.
-
-**`compilation_fnct_li_block(parsing_data, fetched_novels, rules)`**
-The `html_li_block` (mgeko) counterpart, same signature and return shape. `parsing_data` is a list of `{"identity", "chapter_text"}` dicts from `parse_html_li_block`:
-- the slug is the last path segment of the identity href (`/manga/the-archmages-restaurant/` → `the-archmages-restaurant`);
-- the chapter token comes from `chapter_regex` run on the chapter text (`Chapter 26-3-eng-li` → `26-3`) and is stored as a float with the dash turned into a dot (`26.3`);
-- the raw token is kept for the reader URL, because the site writes sub-chapters with a dash: `rules["chapter_url_template"]` (`/reader/en/{slug}-chapter-{chapter}-eng-li/`) is joined to `base_url`;
-- items with a missing or malformed href/text, or a slug that isn't tracked, go to `skipped`; if a novel appears twice the highest chapter wins.
-Edge case accepted for V1: a dash sub-chapter of 10 or more (`26-10`) becomes `26.1`, which sorts below `26.3`.
-
-**`group_subscribers(subscribers_list, updated_novel_list)`**
-Pure. Turns the rows from `fetch_subscribers` into `{telegram_id: [novel rows]}`. Rows with no usable user (`users` missing/`None`, empty or null `telegram_user_id`) or whose `novel_id` isn't in today's updates are skipped. It does not dedupe, because `user_subscriptions` has a UNIQUE index on `(user_id, novel_id)`.
-
-**`print_send_summary(summary)`**
-Prints counts only: `telegram: sent=… blocked=… bad_request=… failed=…`. Never chat ids or message text, because the repo is public and so are its Actions logs.
-
-**`retry(func, max_attempts, *args)`**
-Generic wrapper: calls `func`, and on any exception sleeps 5 seconds and tries again, up to `max_attempts`. Returns `[]` after the last failure. It can only retry something that raises — which is why [[fetching]].`fetch_html` raises on temporary failures. The `database.fetch_*` functions retry internally and never raise, so wrapping them is a harmless no-op.
-
 ## Known gaps / deferred on purpose
-- **mangadex** is skipped each run (mode not supported yet). It stays closed until V1 is finalized.
-- **`skipped` links** are only printed per site. No table yet (V2: a log table with automatic cleanup).
-- **Slugs are shown as titles** in notifications. A display-title column is V2.
-- **Failed sends are not retried in a later run.** The novels table is already updated, so a user who exhausted in-run retries misses that alert. V2 idea: a notified flag or table for at-least-once delivery.
-- **Per-site failures leave no history.** A site that fails every run is only visible in the logs. V2: separate pass/fail tracking, possibly in a second free-tier Supabase project dedicated to logs and errors.
-- **`fetch_subscribers` is called even when nothing was updated** (and `send_all({})` still does one `get_me()` call as a token health check). Skipping the subscriber query when `novel_id_list` is empty is a cheap cleanup.
+- **mangadex** is skipped each run (mode not supported yet).
+- **Skipped links** are only printed per site (capped); there is no log table yet.
+- **Per-site history** is one row per site (`site_health`), not a log: it shows the current streak and the last failure, not the past.
+- **A chapter that appears and disappears between two runs is never seen.** Nothing here can fix that; it is inherent to polling.
+- **New novels start at `latest_chap = -1`.** The bot creates novels without a chapter, and the column defaults to `-1` (`not null`), so the compile functions need no null handling: `-1` is below every real chapter, including chapter 0. The first scrape that sees the novel fills in the real number and notifies the subscriber.
 - `update_scraper_logs`'s return value is ignored by `run()`.
-- **New novels start at `latest_chap = -1`.** The bot creates novels without a chapter, and the column defaults to `-1` (`not null`), so the compile functions need no null handling: `-1` is below every real chapter, including chapter 0. The first scrape that sees the novel on its listing page fills in the real number and notifies the subscriber. A novel that is real but quiet stays at `-1` until it next appears on the site's latest-updates page.
 
 ## Design history worth remembering
-- `compilation_fnct`'s signature went through three shapes: a hidden global `site_parse_rules` → opening the JSON on every call → today's version, where the file is loaded once in `run()` and one site's rule dict is passed down. Chosen to keep it testable in isolation.
-- An early `main.py` had `process_website` looping over all sites and reading an undeclared global — it would have crashed with `NameError`. Fixed by separating the orchestrator from the per-site step.
-- Bugs found in review and fixed (Nov 2026): `update_novels_table` wrote every novel three times (missing `break`); `retry()` never retried `fetch_html` (it swallowed its own errors); a site without `segment_count` in its rules crashed the run; notifications went out for novels whose DB write had failed.
+- The delivery queue replaced the old flow "update novels, then send, losing failed sends for good". Its design decisions (D1 queue before novels, D4 titles never touch `updated_at`, delivery on every run) are spelled out above.
+- `compilation_fnct`'s signature went through several shapes: a hidden global → opening the JSON on every call → one site's rule dict passed down → items from `parse_page`. Chosen each time to keep it testable in isolation.
+- Bugs found in review and fixed over time: `update_novels_table` wrote every novel three times (missing `break`); `retry()` never retried `fetch_html`; a site without `segment_count` crashed the run; hive and vortex also link `…/chapter-425#comment-18624`, whose fragment used to end up in the chapter URL (fragments are now dropped when items are parsed).
 
 ## Related notes
-- [[database]]
-- [[fetching]]
-- [[parsing]]
-- [[telegramMessenger]]
-- [[bot]]
-- [[schema]]
-- [[pytest]]
-- [[site_parse_rules.json]]
+[[database]] · [[fetching]] · [[parsing]] · [[scheduling]] · [[admin]] · [[telegramMessenger]] · [[bot]] · [[schema]] · [[pytest]] · [[site_parse_rules.json]]

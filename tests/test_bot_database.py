@@ -91,20 +91,6 @@ def ops_of(client, index, name):
     return [(a, k) for n, a, k in ops if n == name]
 
 
-# ------------------------------------------------------------------ fetch_subscribers (scraper side)
-
-def test_fetch_subscribers_skips_paused_users(fake, monkeypatch):
-    monkeypatch.setattr(database.time, "sleep", lambda s: None)
-    client = fake([{"novel_id": "n1", "users": {"telegram_user_id": 5}}])
-
-    assert database.fetch_subscribers(["n1"]) == [{"novel_id": "n1", "users": {"telegram_user_id": 5}}]
-
-    assert "users!inner(telegram_user_id)" in ops_of(client, 0, "select")[0][0][0]
-    eq_args = [a for a, k in ops_of(client, 0, "eq")]
-    assert ("reading_status", "reading") in eq_args
-    assert ("users.status", "active") in eq_args
-
-
 # ------------------------------------------------------------------ get_user / create_user
 
 def test_get_user_returns_row_or_none(fake):
@@ -286,19 +272,23 @@ def test_subscribe_propagates_real_database_errors(fake):
 # ------------------------------------------------------------------ list / remove / status
 
 def test_list_subscriptions_flattens_and_sorts_by_name(fake):
-    fake([
-        {"id": "s2", "reading_status": "reading",
-         "novels": {"novel_name": "zeta", "latest_chap": 5, "websites": {"web_domain_name": "https://hivetoons.org/"}}},
-        {"id": "s1", "reading_status": "left",
-         "novels": {"novel_name": "alpha", "latest_chap": -1, "websites": {"web_domain_name": "https://vortexscans.org/"}}},
+    client = fake([
+        {"id": "s2", "reading_status": "reading", "alert_timing": "early",
+         "novels": {"novel_name": "zeta", "display_title": "Zeta Title", "latest_chap": 5, "web_id": "w-hive",
+                    "websites": {"web_domain_name": "https://hivetoons.org/"}}},
+        {"id": "s1", "reading_status": "left", "alert_timing": None,
+         "novels": {"novel_name": "alpha", "display_title": None, "latest_chap": -1, "web_id": "w-vortex",
+                    "websites": {"web_domain_name": "https://vortexscans.org/"}}},
     ])
 
     assert database.list_subscriptions("u1") == [
-        {"id": "s1", "reading_status": "left", "novel_name": "alpha", "latest_chap": -1,
-         "web_domain_name": "https://vortexscans.org/"},
-        {"id": "s2", "reading_status": "reading", "novel_name": "zeta", "latest_chap": 5,
-         "web_domain_name": "https://hivetoons.org/"},
+        {"id": "s1", "reading_status": "left", "alert_timing": None, "novel_name": "alpha", "display_title": None,
+         "latest_chap": -1, "web_id": "w-vortex", "web_domain_name": "https://vortexscans.org/"},
+        {"id": "s2", "reading_status": "reading", "alert_timing": "early", "novel_name": "zeta",
+         "display_title": "Zeta Title", "latest_chap": 5, "web_id": "w-hive", "web_domain_name": "https://hivetoons.org/"},
     ]
+    select = ops_of(client, 0, "select")[0][0][0]
+    assert "alert_timing" in select and "display_title" in select and "web_id" in select and "web_domain_name" in select
 
 
 def test_list_subscriptions_tolerates_missing_nested_data(fake):
@@ -344,3 +334,87 @@ def test_set_subscription_status_rejects_unknown_values_without_a_query(fake):
 def test_set_subscription_status_false_when_nothing_matched(fake):
     fake([])
     assert database.set_subscription_status("u1", "nope", "left") is False
+
+
+# ------------------------------------------------------------------ novel summary, tiers, alert timing
+
+def test_get_novel_summary_looks_up_the_novel_on_its_site(fake):
+    client = fake([{"id": "w1"}], [{"id": "n1", "web_id": "w1", "novel_name": "x", "display_title": "X Title"}])
+    assert database.get_novel_summary("https://asurascans.com/", "x") == {
+        "id": "n1", "web_id": "w1", "novel_name": "x", "display_title": "X Title"}
+    eq_args = [a for a, k in ops_of(client, 1, "eq")]
+    assert ("web_id", "w1") in eq_args and ("novel_name", "x") in eq_args
+
+
+def test_get_novel_summary_returns_none_when_unknown(fake):
+    fake([{"id": "w1"}], [])
+    assert database.get_novel_summary("https://asurascans.com/", "nope") is None
+
+
+def test_get_website_domain(fake):
+    client = fake([{"web_domain_name": "https://asurascans.com/"}], [])
+    assert database.get_website_domain("w1") == "https://asurascans.com/"
+    assert database.get_website_domain("missing") is None
+    assert client.log[0][0] == "websites" and ops_of(client, 0, "eq")[0][0] == ("id", "w1")
+
+
+def test_get_user_tier_returns_the_tier_or_none_and_filters_on_both_ids(fake):
+    client = fake([{"tier": "member"}], [])
+    assert database.get_user_tier("u1", "w1") == "member"
+    assert database.get_user_tier("u1", "w2") is None
+    eq_args = [a for a, k in ops_of(client, 0, "eq")]
+    assert ("user_id", "u1") in eq_args and ("web_id", "w1") in eq_args
+    assert client.log[0][0] == "user_site_tiers"
+
+
+def test_list_user_tiers_maps_site_to_tier(fake):
+    client = fake([{"web_id": "w1", "tier": "member"}, {"web_id": "w2", "tier": "standard"}], [])
+    assert database.list_user_tiers("u1") == {"w1": "member", "w2": "standard"}
+    assert database.list_user_tiers("u2") == {}
+    assert ops_of(client, 0, "eq")[0][0] == ("user_id", "u1")
+
+
+@pytest.mark.parametrize("tier", ["standard", "member"])
+def test_set_user_tier_upserts_on_the_user_site_pair(fake, tier):
+    client = fake([{"user_id": "u1"}])
+    assert database.set_user_tier("u1", "w1", tier) is True
+    args, kwargs = ops_of(client, 0, "upsert")[0]
+    assert args[0] == {"user_id": "u1", "web_id": "w1", "tier": tier}
+    assert kwargs == {"on_conflict": "user_id,web_id"}
+    assert client.log[0][0] == "user_site_tiers"
+
+
+@pytest.mark.parametrize("bad", ["admin", "", None, "MEMBER"])
+def test_set_user_tier_rejects_unknown_tiers_before_any_call(fake, bad):
+    client = fake()
+    with pytest.raises(ValueError):
+        database.set_user_tier("u1", "w1", bad)
+    assert client.log == []
+
+
+@pytest.mark.parametrize("timing", ["early", "when_free", None])
+def test_set_alert_timing_updates_only_the_users_own_subscription(fake, timing):
+    client = fake([{"id": "s1"}])
+    assert database.set_alert_timing("u1", "s1", timing) is True
+    assert ops_of(client, 0, "update")[0][0][0] == {"alert_timing": timing}
+    eq_args = [a for a, k in ops_of(client, 0, "eq")]
+    assert ("id", "s1") in eq_args and ("user_id", "u1") in eq_args
+
+
+def test_set_alert_timing_on_someone_elses_subscription_changes_nothing(fake):
+    fake([])
+    assert database.set_alert_timing("u1", "someone-elses", "early") is False
+
+
+@pytest.mark.parametrize("bad", ["sometimes", "", "EARLY"])
+def test_set_alert_timing_rejects_unknown_values_before_any_call(fake, bad):
+    client = fake()
+    with pytest.raises(ValueError):
+        database.set_alert_timing("u1", "s1", bad)
+    assert client.log == []
+
+
+def test_the_new_bot_functions_propagate_database_errors(fake):
+    fake(RuntimeError("db down"))
+    with pytest.raises(RuntimeError):
+        database.get_user_tier("u1", "w1")
