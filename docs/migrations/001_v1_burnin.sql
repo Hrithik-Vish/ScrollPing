@@ -228,7 +228,9 @@ BEGIN
 END;
 $$;
 
--- transient failure: back to 'pending' for the next run, or 'dead' when out of attempts/time
+-- transient failure: back to 'pending' for the next run, or 'dead' when out of attempts/time.
+-- The attempt cap is 24: the scraper claims a row once per run, so hourly runs give about 24 attempts,
+-- which matches the 24-hour overdue limit below (it was 5 originally; see migrations/002_raise_attempt_cap.sql).
 CREATE OR REPLACE FUNCTION public.release_failed_notifications(notification_ids uuid[], err_text text)
 RETURNS int
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
@@ -236,7 +238,7 @@ AS $$
 DECLARE n int;
 BEGIN
     UPDATE public.pending_notifications
-       SET status = CASE WHEN attempts >= 5 OR due_at < now() - interval '24 hours'
+       SET status = CASE WHEN attempts >= 24 OR due_at < now() - interval '24 hours'
                          THEN 'dead'::public.delivery_status
                          ELSE 'pending'::public.delivery_status END,
            error_detail = left(err_text, 500)

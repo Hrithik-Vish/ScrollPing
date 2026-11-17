@@ -1,6 +1,6 @@
 # Testing (pytest) and CI
 
-**State:** 1,031 tests pass and 9 are skipped by design (manual smoke tests that talk to your real Telegram chat or database). The suite runs in a few seconds, needs no real credentials, and never touches the network. A clean virtual environment built from `requirements.txt` runs it green.
+**State:** 1,042 tests pass and 9 are skipped by design (manual smoke tests that talk to your real Telegram chat or database). The suite runs in a few seconds, needs no real credentials, and never touches the network. A clean virtual environment built from `requirements.txt` runs it green.
 
 ## Layout
 ```
@@ -53,6 +53,7 @@ tests/
 - **`test_admin.py` / `test_admin_step.py`** — see [[admin]].
 - **`test_scraper_database.py`** — every scraper-side function: query shape, chunking, retries, fail-soft behaviour, the `SubscriberFetch` holding novels back, queue batches, acknowledgements, blocked users, health and app state (including that `get_app_state` raises).
 - **`test_main.py`** — `retry`; `compilation_fnct` (updates, ordering, fractional chapters, hash kept in the URL, apostrophes, carrying title, lock state and unlock time of the winning item); `find_title_updates`; `process_website` result objects for ok, degraded, failed and skipped paths on real fixtures; real captured links per site; `group_claimed`, `QueueDelivery`, `dispatch_queue`, summaries.
+- **Outage regression (`test_main.py`, `test_pipeline_flow.py`)** — a Telegram outage must cost a failing row exactly **one** attempt per run: the dispatch loop stops after a pass that gave rows back (before this, all 10 passes re-claimed the same rows: 80 send attempts for two users in one run, and the original attempt cap of 5 marked alerts dead within the minute). The flow tests use an in-memory queue that counts attempts like the SQL does, and check an outage over several hourly runs, delivery after recovery, and the cap finally giving up.
 - **`test_run.py`** — the step order, queue before novels (D1), held-back novels, quiet runs still delivering leftovers, site health recording, title sync, rules problems, fatal send errors flipping the log and exiting 1, no token in output, a failed log insert stopping everything, the admin step's place and isolation.
 - **`test_telegram_messenger.py`** — see [[telegramMessenger]].
 - **`test_preview_run.py`** — the preview tool reports sites, the chapters that would be queued with who is told now or later, flags first-sight novels and big jumps, honours the site filter, and **fails if any write or Telegram function is called**.
@@ -67,7 +68,7 @@ RUN_SMOKE_TESTS=1 python -m pytest tests/test_smokeTest.py tests/test_live_datab
 ```
 - **`test_smokeTest.py`** sends real messages to your own chat (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`): the alert layout (badges, `&` and `<` in a title, a title guessed from a slug), a 120-row message that should arrive as numbered chunks with only the first making a sound, and a sample admin alert and digest. Then check Telegram by eye.
 - **`test_live_database_smoke.py`** reads and writes your real Supabase project (needs `SMOKE_USER_ID` and `SMOKE_NOVEL_ID` for the write tests) and undoes everything: maintenance and queue numbers, the `site_health` join, subscribers, an `app_state` round trip, a queue insert twice (the second ignored), and a novel write that puts `updated_at` back.
-- **The SQL functions** have their own test script, `docs/migrations/001_v1_burnin_tests.sql`, run block by block in the Supabase SQL editor (55 checks, including a two-tab test that two workers never claim the same row). It passed on the real project before the first live run.
+- **The SQL functions** have their own test script, `docs/migrations/001_v1_burnin_tests.sql`, run block by block in the Supabase SQL editor (56 checks, including a two-tab test that two workers never claim the same row). It passed on the real project before the first live run.
 
 ## Bugs the tests and reviews found
 - `compilation_fnct` skipped every real link until slashes were stripped before splitting.
@@ -75,6 +76,7 @@ RUN_SMOKE_TESTS=1 python -m pytest tests/test_smokeTest.py tests/test_live_datab
 - `retry()` never retried `fetch_html` because it swallowed its own errors.
 - A site without `segment_count` in its rules could crash the whole run.
 - Notifications went out for novels whose DB write had failed.
+- A Telegram outage could mark alerts dead within one run: `dispatch_queue` re-claimed rows it had just given back, and every claim counts an attempt (found by the owner's outage simulation; fixed by stopping the loop after a pass with failures, and the SQL cap raised from 5 to 24).
 - A null `latest_chap` (a novel created by the bot before its first scrape) would have crashed `float(None)` and silenced that whole site every run; fixed with a `not null default -1` column.
 - `httpx` logged the Telegram bot token inside every request URL at INFO level (spotted in the first live run); the bot now keeps those loggers quiet and a test pins it.
 - `pytest.ini` config in `tests/` was silently ignored.

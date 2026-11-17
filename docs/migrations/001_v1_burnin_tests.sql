@@ -206,15 +206,17 @@ BEGIN
     PERFORM public._t55_rec('4.3 unexpected error', false, SQLSTATE || ' ' || SQLERRM);
   END;
 
-  -- 4.4 release_failed: back to pending, or dead when out of attempts / older than 24h
+  -- 4.4 release_failed: back to pending, or dead at the 24-attempt cap / when older than 24h
   BEGIN
     INSERT INTO public.pending_notifications(user_id, novel_id, chapter, chapter_url, status, last_attempt_at, attempts) VALUES (v_user, v_novel, 90021, 'https://t55.example/r1', 'sending', now(), 1) RETURNING id INTO v_a;
     INSERT INTO public.pending_notifications(user_id, novel_id, chapter, chapter_url, status, last_attempt_at, attempts) VALUES (v_user, v_novel, 90022, 'https://t55.example/r2', 'sending', now(), 5) RETURNING id INTO v_b;
+    INSERT INTO public.pending_notifications(user_id, novel_id, chapter, chapter_url, status, last_attempt_at, attempts) VALUES (v_user, v_novel, 90024, 'https://t55.example/r4', 'sending', now(), 24) RETURNING id INTO v_d;
     INSERT INTO public.pending_notifications(user_id, novel_id, chapter, chapter_url, status, last_attempt_at, attempts, due_at) VALUES (v_user, v_novel, 90023, 'https://t55.example/r3', 'sending', now(), 1, now() - interval '25 hours') RETURNING id INTO v_c;
-    SELECT public.release_failed_notifications(ARRAY[v_a, v_b, v_c], 'timeout') INTO v_n;
-    PERFORM public._t55_rec('4.4 release returns the number of rows it touched', v_n = 3, v_n::text);
+    SELECT public.release_failed_notifications(ARRAY[v_a, v_b, v_c, v_d], 'timeout') INTO v_n;
+    PERFORM public._t55_rec('4.4 release returns the number of rows it touched', v_n = 4, v_n::text);
     PERFORM public._t55_rec('4.4 first failure goes back to pending for the next run', (SELECT status FROM public.pending_notifications WHERE id = v_a) = 'pending', NULL);
-    PERFORM public._t55_rec('4.4 fifth failed attempt becomes dead', (SELECT status FROM public.pending_notifications WHERE id = v_b) = 'dead', NULL);
+    PERFORM public._t55_rec('4.4 a fifth failed attempt is NOT final (the cap is 24)', (SELECT status FROM public.pending_notifications WHERE id = v_b) = 'pending', NULL);
+    PERFORM public._t55_rec('4.4 the 24th failed attempt becomes dead', (SELECT status FROM public.pending_notifications WHERE id = v_d) = 'dead', NULL);
     PERFORM public._t55_rec('4.4 a row older than 24h becomes dead', (SELECT status FROM public.pending_notifications WHERE id = v_c) = 'dead', NULL);
     DELETE FROM public.pending_notifications WHERE chapter >= 90000 AND user_id = v_user AND novel_id = v_novel;
   EXCEPTION WHEN OTHERS THEN

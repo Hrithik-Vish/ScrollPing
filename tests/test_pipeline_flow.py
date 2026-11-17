@@ -49,6 +49,8 @@ class World:
         self.queue = []              # dicts: user_id, novel_id, chapter, status, due_at, access_state, unlock_at, id
         self.sent = []               # (telegram_id, novel_name, chapter, access_state) in delivery order
         self.send_calls = 0
+        self.attempt_cap = 24        # mirrors release_failed_notifications (the original SQL used 5)
+        self.claims = 0              # rows handed out by claim_due, over all passes
 
     # ---- database stand-ins
     def fetch_websites(self):
@@ -89,6 +91,8 @@ class World:
         for q in self.queue:
             if q["status"] == "pending" and datetime.fromisoformat(q["due_at"]) <= self.now:
                 q["status"] = "sending"
+                q["attempts"] = q.get("attempts", 0) + 1            # the SQL counts the attempt at claim time
+                self.claims += 1
                 claimed.append({"notification_id": q["id"], "telegram_user_id": self.users[q["user_id"]],
                                 "novel_name": by_id[q["novel_id"]]["novel_name"], "display_title": by_id[q["novel_id"]]["display_title"],
                                 "web_domain_name": domain_of[by_id[q["novel_id"]]["web_id"]],
@@ -106,6 +110,15 @@ class World:
                 sent += 1
             delivery.ack_sent([r["notification_id"] for r in rows])
         return {"sent": sent, "blocked": 0, "bad_request": 0, "failed": 0, "retried": 0}
+
+    def release(self, ids, error_text):
+        """Like release_failed_notifications: back to pending, or dead once the attempt cap is reached."""
+        changed = 0
+        for q in self.queue:
+            if q["id"] in ids and q["status"] == "sending":
+                q["status"] = "dead" if q["attempts"] >= self.attempt_cap else "pending"
+                changed += 1
+        return changed
 
     def ack_sent(self, ids):
         n = 0
@@ -274,3 +287,64 @@ def test_a_failing_and_a_blocking_user_are_handled_through_the_real_delivery(wor
     assert len(calls["released"]) == 1 and calls["released"][0][1] == "network"   # member's rows given back for the next run
     assert calls["dead"] == []
     assert not [q for q in world.queue if q["status"] == "sent"]               # nothing was acknowledged as sent
+
+
+# ---------------------------------------------------------------- Telegram outages and the attempt cap
+
+@pytest.fixture
+def outage(world, real_messenger, monkeypatch):
+    """The real messenger and the real dispatch loop, with a queue that counts attempts like the SQL does."""
+    telegram, calls = real_messenger
+    monkeypatch.setattr(main.database, "release", world.release)
+    telegram.script = {1001: [NetworkError("telegram is down")] * 5000, 1002: [NetworkError("telegram is down")] * 5000}
+    return world, telegram
+
+
+def test_one_run_during_an_outage_counts_one_attempt_per_row_and_never_kills_it(outage):
+    """Regression: dispatch_queue used to claim a released row again in the next pass of the SAME run,
+    so five passes (about a minute) burned through the cap of 5 and marked the alerts dead."""
+    world, telegram = outage
+    world.attempt_cap = 5                          # the original, stricter SQL: even this must survive one run
+    main.run()
+    due = [q for q in world.queue if datetime.fromisoformat(q["due_at"]) <= world.now]
+    waiting = [q for q in world.queue if datetime.fromisoformat(q["due_at"]) > world.now]     # standard readers, until unlock
+    assert due and waiting, "expected some rows due now and some waiting for an unlock"
+    assert all(q["status"] == "pending" and q["attempts"] == 1 for q in due)
+    assert all(q["status"] == "pending" and q.get("attempts", 0) == 0 for q in waiting)       # never claimed
+    assert world.claims == len(due)                # every due row was claimed exactly once in the run
+
+
+def test_an_outage_does_not_hammer_the_queue_with_extra_passes(outage):
+    world, telegram = outage
+    main.run()
+    sends_in_one_run = len(telegram.messages)
+    assert sends_in_one_run <= 2 * (1 + tm.MAX_RETRY_ROUNDS)         # one message per user, each tried 1 + retry rounds times
+
+
+def test_alerts_survive_a_multi_hour_outage_and_are_delivered_once_telegram_is_back(outage):
+    world, telegram = outage
+    main.run()
+    for hour in range(1, 6):                                          # five more hourly runs, Telegram still down
+        world.now = START + timedelta(hours=hour)
+        main.run()
+    first_batch = [q for q in world.queue if datetime.fromisoformat(q["due_at"]) <= START]        # due from the first run on
+    assert first_batch and all(q["status"] == "pending" and q["attempts"] == 6 for q in first_batch)   # one attempt per run
+
+    telegram.script = {}                                              # Telegram is back
+    messages_before = len(telegram.messages)
+    world.now = START + timedelta(hours=6)
+    main.run()
+    assert len(telegram.messages) > messages_before, "the alerts must still be delivered after the outage"
+    due = [q for q in world.queue if datetime.fromisoformat(q["due_at"]) <= world.now]
+    assert due and all(q["status"] == "sent" for q in due)
+    assert all(q["attempts"] == 7 for q in due if datetime.fromisoformat(q["due_at"]) <= START)      # six failed runs, then delivered
+
+
+def test_a_row_that_keeps_failing_is_finally_given_up_at_the_attempt_cap(outage):
+    world, telegram = outage
+    world.attempt_cap = 3
+    for hour in range(5):
+        world.now = START + timedelta(hours=hour)
+        main.run()
+    assert all(q["status"] == "dead" for q in world.queue if datetime.fromisoformat(q["due_at"]) <= START)
+    assert all(q["attempts"] == 3 for q in world.queue if q["status"] == "dead")       # stopped being claimed at the cap

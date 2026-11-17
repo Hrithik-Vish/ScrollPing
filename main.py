@@ -263,7 +263,14 @@ def merge_summaries(total, summary):
 def dispatch_queue(delivery=None, rules=None):
     """Claim due rows and send them, repeating while there is more (at most MAX_DISPATCH_PASSES).
     Runs every time, even when nothing new was detected: the queue also holds retries and delayed
-    unlocks from earlier runs. Rows left 'sending' if the process dies are recovered by the next run."""
+    unlocks from earlier runs. Rows left 'sending' if the process dies are recovered by the next run.
+
+    The loop STOPS after a pass in which any row was given back (a transient Telegram or network
+    failure). A released row is 'pending' and due again at once, so the next pass of the same run
+    would claim it a second time, and every claim counts an attempt: an outage of a minute or two
+    used to burn through the attempt cap and mark the alerts dead. Now a failing row is claimed once
+    per run, and its remaining attempts stretch over the following hourly runs and the 24 hours it
+    is allowed to live. If more rows were still due than one pass can claim, they wait for the next run."""
     delivery = delivery or QueueDelivery()
     total = {key: 0 for key in SUMMARY_KEYS}
     for _ in range(MAX_DISPATCH_PASSES):
@@ -272,6 +279,11 @@ def dispatch_queue(delivery=None, rules=None):
             break
         summary = telegramMessenger.send_all(group_claimed(claimed), delivery, rules=rules, now=utcnow())
         merge_summaries(total, summary)
+        given_back = _count(summary.get("failed"))
+        if given_back:
+            print(f"dispatch: {given_back} row(s) were given back to the queue, stopping early; "
+                  "they are retried on the next run")
+            break
     return total
 
 

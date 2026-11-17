@@ -1,9 +1,7 @@
 """Preview what the next scraper run WOULD do, without doing any of it. Meant for your own terminal.
 
     python -m scripts.preview_run                 # every supported site
-    docker exec -it scrollping-dev python -m scripts.preview_run     # for those who use docker 
     python -m scripts.preview_run --site hive     # only sites whose URL contains "hive"
-    docker exec -it scrollping-dev python -m scripts.preview_run --site hive    # for those who use docker 
 
 It fetches the live pages (like a real run), compares them with your database, finds the recipients and
 works out the queue records and their due times, then prints a report. It NEVER writes: no queue rows,

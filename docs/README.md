@@ -4,7 +4,7 @@
 
 A Python scraper that watches manga / manhwa / manhua / novel aggregator sites for new chapter releases and sends Telegram alerts to the people following those titles, plus a Telegram bot (`@ScrollPingBot`) where people sign up and manage the novels they follow. It is built to run entirely within free-tier limits.
 
-> **Status:** 🚧 V1 burn-in build. The whole pipeline (scrape → compare → queue → deliver) works end to end for 5 of the 6 target sites, with real titles in the alerts, early-access (locked chapter) awareness for asurascans, a delivery queue that survives crashes, per-site health tracking with admin alerts and a daily digest, and a bot with a two-level `/list`, per-novel alert timing and `/settings`. 1,031 automated tests pass in CI. The scraper runs on a GitHub Actions schedule and the bot deploys to a Render free web service (see [`docs/deployment.md`](docs/deployment.md)). Still to do for V1: the live burn-in and a security review before opening it to other people.
+> **Status:** 🚧 V1 burn-in build. The whole pipeline (scrape → compare → queue → deliver) works end to end for 5 of the 6 target sites, with real titles in the alerts, early-access (locked chapter) awareness for asurascans, a delivery queue that survives crashes, per-site health tracking with admin alerts and a daily digest, and a bot with a two-level `/list`, per-novel alert timing and `/settings`. 1,042 automated tests pass in CI. The scraper runs on a GitHub Actions schedule and the bot deploys to a Render free web service (see [`docs/deployment.md`](docs/deployment.md)). Still to do for V1: the live burn-in and a security review before opening it to other people.
 
 ## Why I built this
 
@@ -22,7 +22,7 @@ ScrollPing is my first independent project outside of coursework: an attempt to 
 - Bot hardening: HTML-escaped output everywhere, private chats only, per-user rate limiting, a 50-novel cap per user, strict link and input validation, ownership checks on every change
 - **Per-site error isolation:** a site that is down, blocked or broken is skipped; the rest of the run continues
 - Designed to stay within free-tier limits: batched database calls (one RPC for a whole run's novel updates), one message per user
-- 1,031 automated tests (pytest) run on every push through GitHub Actions
+- 1,042 automated tests (pytest) run on every push through GitHub Actions
 
 ## How it works
 
@@ -120,7 +120,7 @@ ScrollPing/
 ├── .github/workflows/         # tests.yml (CI), scraper.yml (scheduled scraper run)
 ├── scripts/
 │   └── preview_run.py         # read-only preview of what the next run would queue and send (never writes)
-├── tests/                     # 1,040 tests (9 manual smoke tests are skipped by default)
+├── tests/                     # 1,051 tests (9 manual smoke tests are skipped by default)
 │   ├── fixtures/              # trimmed real captures of all five sites + real_links.json
 │   └── test_*.py
 ├── docs/                      # Obsidian-style notes on each module, schema, deployment, tests, security brief
@@ -174,7 +174,7 @@ Copy `.env.example` to `.env` (git-ignored) and fill it in:
 | `ADMIN_TELEGRAM_USER_IDS` | admin alerts and the digest | comma-separated Telegram ids; empty switches both off |
 | `TELEGRAM_CHAT_ID`, `SMOKE_USER_ID`, `SMOKE_NOVEL_ID` | manual smoke tests only | your own chat id; a real user id and novel id |
 
-Create the tables in Supabase with the SQL in [`docs/schema.md`](docs/schema.md), then run [`docs/migrations/001_v1_burnin.sql`](docs/migrations/001_v1_burnin.sql) (it is safe to run twice). In the Supabase Auth settings, turn off public sign-ups: the bot creates users through the admin API, which ignores that switch.
+Create the tables in Supabase with the SQL in [`docs/schema.md`](docs/schema.md), then run [`docs/migrations/001_v1_burnin.sql`](docs/migrations/001_v1_burnin.sql) (it is safe to run twice; a database that ran an earlier version of it also needs [`docs/migrations/002_raise_attempt_cap.sql`](docs/migrations/002_raise_attempt_cap.sql), which raises the delivery attempt cap from 5 to 24). In the Supabase Auth settings, turn off public sign-ups: the bot creates users through the admin API, which ignores that switch.
 
 Run the scraper (one pass, meant for a schedule):
 
@@ -200,7 +200,7 @@ Step by step, with the caveats: [`docs/deployment.md`](docs/deployment.md).
 ## Testing
 
 ```bash
-python -m pytest            # 1031 passed, 9 skipped
+python -m pytest            # 1042 passed, 9 skipped
 ```
 
 - No real credentials are needed: `tests/conftest.py` sets dummy values and every external call (HTTP, Supabase, Telegram) is faked.
@@ -210,7 +210,7 @@ python -m pytest            # 1031 passed, 9 skipped
   RUN_SMOKE_TESTS=1 python -m pytest tests/test_smokeTest.py tests/test_live_database_smoke.py -v -s
   ```
   On Windows PowerShell, set `$env:RUN_SMOKE_TESTS = "1"` first.
-- The SQL functions have their own test script, [`docs/migrations/001_v1_burnin_tests.sql`](docs/migrations/001_v1_burnin_tests.sql), run by hand in the Supabase SQL editor (55 checks, including a two-tab test that two workers never claim the same row).
+- The SQL functions have their own test script, [`docs/migrations/001_v1_burnin_tests.sql`](docs/migrations/001_v1_burnin_tests.sql), run by hand in the Supabase SQL editor (56 checks, including a two-tab test that two workers never claim the same row).
 - Inside the Docker dev container, the VS Code tasks in `.vscode/tasks.json` run the file or the tests (Ctrl+Alt+1 and Ctrl+Alt+2 in my setup).
 
 More detail in [`docs/pytest.md`](docs/pytest.md).
@@ -259,7 +259,7 @@ More detail in [`docs/pytest.md`](docs/pytest.md).
 
 **Next (V1)**
 - [ ] Live burn-in: a read-only preview, a local run, then watch the first scheduled runs and a month of measurements, step by step in [`docs/burnin.md`](docs/burnin.md)
-- [ ] Security pass (RLS review, secrets handling) before opening it to other people: the brief for the reviewer is [`docs/security-review.md`](docs/security-review.md)
+- [ ] Security pass (RLS review, secrets handling) of the current code before opening it to other people
 
 **Deferred (V2 and later)**
 - [ ] MangaDex (JSON mode), including a way past the browser verification
@@ -273,7 +273,7 @@ More detail in [`docs/pytest.md`](docs/pytest.md).
 
 ## Security
 
-Secrets live in `.env` (git-ignored) locally and in GitHub Actions secrets in CI; nothing sensitive is committed. The Supabase secret key bypasses Row Level Security and must stay on the server side, which is why the bot validates its own input and checks ownership on every change. The new SQL functions and tables are closed to the public API roles (`anon`, `authenticated`) and open only to the service role; a test checks that against the real project. Logging keeps the HTTP libraries quiet because a Telegram request URL contains the bot token. CI logs print counts only, never chat ids, titles or message text. A dedicated security review is planned before the project is opened up (open items are listed in [`docs/security-review.md`](docs/security-review.md) and [`docs/schema.md`](docs/schema.md)).
+Secrets live in `.env` (git-ignored) locally and in GitHub Actions secrets in CI; nothing sensitive is committed. The Supabase secret key bypasses Row Level Security and must stay on the server side, which is why the bot validates its own input and checks ownership on every change. The new SQL functions and tables are closed to the public API roles (`anon`, `authenticated`) and open only to the service role; a test checks that against the real project. Logging keeps the HTTP libraries quiet because a Telegram request URL contains the bot token. CI logs print counts only, never chat ids, titles or message text. A dedicated security review of the current code is planned before the project is opened up to other people (the database side is described in [`docs/schema.md`](docs/schema.md)).
 
 ## License
 

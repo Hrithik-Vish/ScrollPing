@@ -67,7 +67,7 @@ One user's rows become one or more messages:
 | `sent` | `delivery.ack_sent(row_ids)` at once |
 | `blocked` | `delivery.blocked(chat_id, ids)` with **every** row of that user not yet settled (this chunk, later chunks, queued retries); the rest of that user's chunks are skipped and their queued retries dropped |
 | `bad_request` | three steps: **(a)** resend the chunk as **one message per row** (still escaped HTML), acknowledging each row on its own; **(b)** a row still refused is sent as **plain text** (no markup, URL on its own line); **(c)** refused even then → `delivery.mark_dead([id], "bad_request")`. A single-row chunk skips (a). Telegram's error text is never stored or returned |
-| `network`, `rate_limited` (still active), `unknown` | queued for the **retry rounds**: up to 3 rounds, 5 seconds apart. Still failing afterwards → `delivery.release(ids, category)`, and the queue gives the rows back for the next run (or marks them dead after 5 attempts or 24 hours) |
+| `network`, `rate_limited` (still active), `unknown` | queued for the **retry rounds**: up to 3 rounds, 5 seconds apart. Still failing afterwards → `delivery.release(ids, category)`, and the queue gives the rows back for the next run (or marks them dead at the 24-attempt cap or after 24 hours). The retry rounds are *inside* one claim and do not count as attempts: the queue counts one attempt per claim, and [[main]]'s dispatch loop claims a failing row only once per run |
 
 `unknown` (any other Telegram error) is retried, as the spec says; before the queue existed it was final. A blocked user mid-fallback stops the remaining rows of that chunk.
 

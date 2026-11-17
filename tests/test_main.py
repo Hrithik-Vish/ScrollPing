@@ -633,10 +633,47 @@ def test_dispatch_defaults_to_a_queue_delivery(queue):
 
 def test_dispatch_keeps_claiming_until_the_queue_is_empty_and_adds_up_the_summaries(queue):
     queue["passes"] = [[claimed_row("q1", 111)], [claimed_row("q2", 222)], [claimed_row("q3", 333)]]
-    queue["summary"] = {"sent": 2, "blocked": [1], "bad_request": 0, "failed": [("x", "network")], "retried": 1}
+    queue["summary"] = {"sent": 2, "blocked": [1], "bad_request": [("x", "y")], "failed": 0, "retried": 1}
     total = main.dispatch_queue()
     assert len(queue["sent"]) == 3 and len(queue["claim_limits"]) == 4
-    assert total == {"sent": 6, "blocked": 3, "bad_request": 0, "failed": 3, "retried": 3}
+    assert total == {"sent": 6, "blocked": 3, "bad_request": 3, "failed": 0, "retried": 3}
+
+
+def test_dispatch_stops_after_a_pass_that_gave_rows_back_so_they_are_not_claimed_again(queue, capsys):
+    """Regression: a released row is pending and due at once, so the next pass of the same run would
+    claim it again, and every claim counts an attempt (an outage burned the whole attempt cap in a minute)."""
+    queue["passes"] = [[claimed_row("q1", 111)], [claimed_row("q1", 111)], [claimed_row("q1", 111)]]
+    queue["summary"] = {"sent": 0, "blocked": 0, "bad_request": 0, "failed": 1, "retried": 0}
+    total = main.dispatch_queue()
+    assert len(queue["sent"]) == 1 and len(queue["claim_limits"]) == 1       # one claim, one send, then stop
+    assert len(queue["passes"]) == 2                                          # the other passes were never claimed
+    assert total["failed"] == 1
+    out = capsys.readouterr().out
+    assert "1 row(s) were given back to the queue, stopping early" in out and "q1" not in out and "111" not in out
+
+
+@pytest.mark.parametrize("failed", [1, 5, [("a", "network")], [("a", "network"), ("b", "unknown")]])
+def test_any_failed_count_or_collection_stops_the_loop(queue, failed):
+    queue["passes"] = [[claimed_row("q1", 111)], [claimed_row("q2", 222)]]
+    queue["summary"] = {"sent": 0, "blocked": 0, "bad_request": 0, "failed": failed, "retried": 0}
+    main.dispatch_queue()
+    assert len(queue["sent"]) == 1
+
+
+def test_dead_blocked_and_retried_rows_do_not_stop_the_loop(queue):
+    """Only rows that go back to 'pending' (failed) can be claimed again; the others are final."""
+    queue["passes"] = [[claimed_row("q1", 111)], [claimed_row("q2", 222)]]
+    queue["summary"] = {"sent": 1, "blocked": 1, "bad_request": 2, "failed": 0, "retried": 4}
+    main.dispatch_queue()
+    assert len(queue["sent"]) == 2
+
+
+def test_a_run_gives_a_failing_row_exactly_one_claim(queue):
+    """The queue hands the same row out each time it is asked, like a released pending row."""
+    queue["passes"] = [[claimed_row("q1", 111)] for _ in range(10)]
+    queue["summary"] = {"sent": 0, "blocked": 0, "bad_request": 0, "failed": 1, "retried": 0}
+    main.dispatch_queue()
+    assert len(queue["claim_limits"]) == 1
 
 
 def test_dispatch_is_capped_at_ten_passes(queue):

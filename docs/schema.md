@@ -92,7 +92,7 @@ Interactions worth knowing:
 - A website with no novels is deleted on Sundays, so [[database]].`get_or_create_website` recreates the row when the next user adds a novel.
 
 ## V1 burn-in additions
-Applied with [`migrations/001_v1_burnin.sql`](migrations/001_v1_burnin.sql); it is safe to run twice. Its checks are in [`migrations/001_v1_burnin_tests.sql`](migrations/001_v1_burnin_tests.sql) (run block by block in the SQL editor: 55 checks, including a two-tab test that two workers never claim the same row). Both ran green against the real project before the first live run.
+Applied with [`migrations/001_v1_burnin.sql`](migrations/001_v1_burnin.sql); it is safe to run twice. A database that ran the **original** 001 (attempt cap 5) also needs [`migrations/002_raise_attempt_cap.sql`](migrations/002_raise_attempt_cap.sql), which raises the cap to 24 with no downtime; a fresh database gets 24 from 001 directly. Its checks are in [`migrations/001_v1_burnin_tests.sql`](migrations/001_v1_burnin_tests.sql) (run block by block in the SQL editor: 56 checks, including a two-tab test that two workers never claim the same row). Both ran green against the real project before the first live run.
 
 ### Enums and columns on existing tables
 - Enums: `access_state` (`free`, `locked`, `unknown`), `alert_timing` (`early`, `when_free`), `site_tier` (`standard`, `member`), `delivery_status` (`pending`, `sending`, `sent`, `dead`, `cancelled`).
@@ -115,7 +115,7 @@ All are `SECURITY DEFINER` with a fixed `search_path`, and executable **only by 
 | `claim_due_notifications(batch_limit int)` | atomically takes `pending` rows that are due (`due_at <= now`) for **active** users whose subscription is still `reading`, using `FOR UPDATE SKIP LOCKED`; marks them `sending`, counts the attempt, and returns them joined with the Telegram id, novel name and title, and site. Two workers can never receive the same row |
 | `mark_notifications_sent(notification_ids uuid[])` | `sending` → `sent`; returns how many changed (0 when repeated) |
 | `mark_notifications_dead(notification_ids, err_text)` | `sending` → `dead` with a reason |
-| `release_failed_notifications(notification_ids, err_text)` | `sending` → `pending`, or `dead` after 5 attempts or once the row is 24 hours overdue |
+| `release_failed_notifications(notification_ids, err_text)` | `sending` → `pending`, or `dead` at the **24-attempt cap** or once the row is 24 hours overdue. The scraper claims a row once per run, so hourly runs give about 24 attempts in the 24 hours a row may live (the cap was 5 originally; databases that ran the original 001 need [`migrations/002_raise_attempt_cap.sql`](migrations/002_raise_attempt_cap.sql)) |
 | `maintain_notification_queue()` | returns `recovered` (rows stuck `sending` for over 30 minutes go back to `pending`), `cancelled` (`pending` rows whose subscription no longer exists or is not `reading`; paused users are **kept**, not cancelled) and `expired` (`pending` rows more than 24 hours overdue → `dead`) |
 | `record_site_result(p_web_id, p_status, p_error)` | upserts the site's health row: failures extend the streak (and set `failing_since` once), `ok` or `degraded` end it and stamp `last_resolved_at`; an unknown status raises. Returns `o_consecutive_failures`, `o_failure_alerted` |
 | `queue_stats_24h()` | one row of last-24-hour numbers for the digest |

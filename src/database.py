@@ -365,7 +365,8 @@ def ack_sent(ids):
 
 
 def release(ids, error_text):
-    """Give rows back after a transient send failure: pending again, or dead after 5 attempts / 24h."""
+    """Give rows back after a transient send failure: pending again, or dead at the 24-attempt cap / after 24h. (The scraper claims a
+    row once per run, so hourly runs spread the attempts over the 24 hours; see main.dispatch_queue.)"""
     return _ack("releasing failed notifications", "release_failed_notifications", ids, {"err_text": _short_error(error_text) or "unknown"})
 
 

@@ -1,6 +1,6 @@
 # V1 burn-in runbook (Phase 9)
 
-How to take the finished V1 code live safely, what to look at in the first runs, and what to measure over the month. Everything in the repository is built and tested (1,031 tests, the SQL functions, the migration). What is left can only be verified against the real services, in this order:
+How to take the finished V1 code live safely, what to look at in the first runs, and what to measure over the month. Everything in the repository is built and tested (1,042 tests, the SQL functions, the migration). What is left can only be verified against the real services, in this order:
 
 1. a read-only **preview** of what the first run would do (nothing is written or sent)
 2. one **local run** with your real `.env`, then a second one that must find nothing
@@ -59,7 +59,7 @@ select u.username, q.chapter, q.access_state, q.unlock_at, q.due_at, q.status, q
 
 ### 1.1 Tests and environment
 ```
-python -m pytest -q                     # 1031 passed, 9 skipped (the 9 are the manual smoke tests)
+python -m pytest -q                     # 1042 passed, 9 skipped (the 9 are the manual smoke tests)
 ```
 Your `.env` needs `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_PUBLISHABLE_KEY` (any non-empty value), `TELEGRAM_BOT_TOKEN` and `ADMIN_TELEGRAM_USER_IDS`. The GitHub repository secrets need the same (`ADMIN_TELEGRAM_USER_IDS` was added). Optional but worth doing once: the two manual smoke tests (`docs/pytest.md`).
 
@@ -186,7 +186,7 @@ Accurate wording for the README and a resume, once you have the numbers: "Design
 | `… novel(s) held back this run` | recipients or queue rows could not be written | harmless for one run; if every run, check the Supabase status |
 | `novels: 0 of N updated` but alerts arrived | the batch update failed | nothing is lost (the queue has the alerts); the next run detects them again and the unique key prevents duplicates |
 | `queue maintenance: recovered=N` | a previous run died or stalled while sending | expected after a cancelled or crashed run; the rows are retried |
-| `telegram: … failed=N` | Telegram or the network kept failing | the rows go back to the queue and are retried on later runs (up to 5 attempts or 24 hours) |
+| `telegram: … failed=N` | Telegram or the network kept failing | the rows go back to the queue and are retried on later runs (one attempt per run, up to 24 attempts or 24 hours; the run stops claiming as soon as rows were given back, so an outage never burns the attempts in one run) |
 | `telegram: … bad_request=N` | Telegram refused those messages even as plain text | investigate the row (query 5); only that row is dead |
 | `telegram: … blocked=N` | users blocked the bot | they are paused automatically; `/start` brings them back |
 | `admin: ADMIN_TELEGRAM_USER_IDS is not set` | the secret is missing or empty | add it (alerts and the digest are skipped meanwhile) |
